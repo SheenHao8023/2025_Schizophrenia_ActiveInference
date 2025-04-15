@@ -1,4 +1,4 @@
-packages <- c("ggprism", "ggsci", "ggpubr", "ggplot2", "dplyr", "tidyr")
+packages <- c("ggprism", "ggsci", "ggpubr", "ggplot2", "dplyr", "tidyr", 'readxl', 'openxlsx', 'stringr')
 for (pkg in packages) {
   if (!require(pkg, character.only = TRUE)) {
     install.packages(pkg, dependencies = TRUE)
@@ -7,6 +7,32 @@ for (pkg in packages) {
     library(pkg, character.only = TRUE)
   }
 }
+
+# Computing and normalizing index
+raw_dir <- "C:/Users/haox8/Desktop/empirical_data/behav_rawfiles"
+main_file <- "C:/Users/haox8/Desktop/empirical_data/data_behav&sympt.xlsx"
+file_list <- list.files(raw_dir, pattern = "\\.xlsx$", full.names = TRUE)
+mean_values <- data.frame(SubID = character(), IC = numeric(), WS = numeric(), stringsAsFactors = FALSE)
+
+for (file in file_list) {
+  sub_id <- str_extract(basename(file), "\\d{5}")
+  dat <- read_excel(file)
+  ic_mean <- mean(dat$IC, na.rm = TRUE)
+  ws_mean <- mean(dat$WS, na.rm = TRUE)
+  mean_values <- rbind(mean_values, data.frame(SubID = sub_id, IC = ic_mean, WS = ws_mean))
+}
+
+main_data <- read.xlsx(main_file)
+main_data <- main_data %>%
+  left_join(mean_values, by = "SubID") %>%
+  mutate(
+    IC = coalesce(IC.y, IC.x),
+    WS = coalesce(WS.y, WS.x)
+  ) %>%
+  select(-IC.x, -IC.y, -WS.x, -WS.y)
+main_data$IC <- 1 / (1 + exp(-scale(main_data$IC)))
+main_data$WS <- 1 / (1 + exp(-scale(main_data$WS)))
+write.xlsx(main_data, main_file, overwrite = TRUE)
 
 # SymptomsPlot, FigX
 data <- data.frame( 
@@ -46,13 +72,7 @@ ggsave(filename = file.path("C:/Users/XinHao/Desktop/2025_SCZ_AI/SampleSymptomDa
 # BehaviorPlot_IC, FigX
 data <- data.frame(group = factor(c(rep('HC',12),rep('PS',8),rep('NS',4),rep('NA',1),rep('BA',2),rep('WD',2)),
   levels = c('HC','PS','NS','NA','BA','WD')),
-  exp = c(0.736740518696357, 0.718849142735551, 0.463212981412826, 0.814311576831261, 
-          0.675254248541746, 0.753779164191638, 0.365773844835089, 0.496924019273831, 
-          0.853665483618762, 0.81992918283153, 0.468329846354709, 0.625123655700655, 
-          0.254162034711293, 0.522578528601808, 0.47415946082266, 0.63329344053583, 
-          0.310927820260869, 0.349407367664736, 0.482001044489097, 0.258375291767164, 
-          0.213138136393294, 0.325858950437347, 0.122370341619107, 0.238565279588251, 0,
-          0.213138136393294, 0.325858950437347, 0.122370341619107, 0.238565279588251))
+  exp = c(main_data$IC[13:24], main_data$IC[1:8], main_data$IC[9:12], 0, main_data$IC[9:10],main_data$IC[11:12]))
 ggplot(data = data, mapping = aes(x = factor(group), y = exp, fill = group))+ 
   stat_summary(fun = "mean",geom = "bar", width = 0.7, colour = NA, size = 0.9)+ 
   geom_jitter(data = subset(data, group != "NA"), size = 1)+ 
@@ -70,7 +90,7 @@ ggplot(data = data, mapping = aes(x = factor(group), y = exp, fill = group))+
   labs(x=NULL, y="IC")+
   geom_rect(aes(xmin=2.5, xmax=3.5,ymin=-0.02,ymax=0.4), fill = NA, color='black', linetype = 'dashed', size=0.75) + 
   geom_rect(aes(xmin=4.5, xmax=6.5,ymin=-0.02,ymax=0.4), fill = NA, color='black', linetype = 'dashed', size=0.75)
-ggsave(filename = file.path("C:/Users/XinHao/Desktop/2025_SCZ_AI/BehaviorData", "BehaviorPlot_IC.png"),  width = 5, height = 4, dpi = 500)
+ggsave(filename = file.path(raw_dir, "BehaviorPlot_IC.png"),  width = 5, height = 4, dpi = 500)
 
 
 # BehaviorPlot_WS, FigX
