@@ -1,19 +1,15 @@
 ---
 title: "Results_corr&glm"
 author: 'XinHao'
-date: "2025-04-18"
+date: "2025-08-20"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
-
 ## R Markdown
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+这个R markdown用来储存simulation data的相关性分析和GLM分析代码和结果，并包含初步图片生成，以帮助研究者复现文中的实验结果。
 
-```{r corr-glm-analysis, message=FALSE, warning=FALSE}
+## 使用到的包
+```{r loadpackages, message=FALSE, warning=FALSE}
 packages <- c("ggExtra", "bruceR", "emmeans", "ggplot2", "readr")
 for (pkg in packages) {
   if (!require(pkg, character.only = TRUE)) {
@@ -23,7 +19,10 @@ for (pkg in packages) {
     library(pkg, character.only = TRUE)
   }
 }
+```
 
+## 导入模拟生成的数据
+```{r loaddata, message=FALSE, warning=FALSE}
 # Load simulation data
 file_path <- "C:/Users/XinHao/Desktop/2025_SCZ_AI/simulation/"
 nd_data <- read_csv(paste0(file_path, 'nd_sim_17apr.csv'))
@@ -33,8 +32,10 @@ sub2data <- subset(nd_data, Group %in% c('HC', 'PS', 'BA', 'WD'))
 sub2data$Group <- factor(sub2data$Group, levels = c('HC', 'PS', 'BA', 'WD'))
 colors_3group <- c('HC' = '#66c2a5', 'PS' = '#fc8d62', 'NS' = '#8da0cb')
 colors_4group <- c('HC' = '#66c2a5', 'PS' = '#fc8d62', 'BA' = '#e78ac3', 'WD' = '#a6d854')
+```
 
-# 1. [double check]print correlation matrix (Bonf correction)
+## 相关性分析
+```{r corranalysis, message=FALSE, warning=FALSE}
 correlation_matrices <- list()
 pvalue_matrices <- list()
 groups <- unique(nd_data$Group)
@@ -75,8 +76,10 @@ for (group in groups) {
         ifelse(is.na(x), NA, formatC(x, format='f', digits=4)))
     print(p_matrix_formatted)
 }
+```
 
-# 2. print GLM model
+## GLM分析
+```{r glmanalysis, message=FALSE, warning=FALSE}
 create_models <- function(data) {
   IC_model <- glm(IC ~ Group * (Prior_IC + Prior_WS + IC_pcs + WS_pcs + Pr_IC + Pr_WS), 
                   data = data, family = gaussian())
@@ -87,8 +90,10 @@ create_models <- function(data) {
 }
 models1 <- create_models(sub1data)
 models2 <- create_models(sub2data)
+```
 
-#3. print contrasts
+## 成对比较分析
+```{r contrastanalysis, message=FALSE, warning=FALSE}
 extract_contrasts <- function(model, vars, groups, contrasts) {
   results <- list()
   for (var in vars) {
@@ -135,8 +140,10 @@ print_contrast_results(results_3group_IC)
 print_contrast_results(results_3group_WS)
 print_contrast_results(results_4group_IC)
 print_contrast_results(results_4group_WS)
+```
 
-# 4. save scatter plots and slopes
+## 定义拟合图的函数
+```{r plots, message=FALSE, warning=FALSE}
 create_significance_matrix <- function(results, groups, contrasts, vars) {
   significance_matrix <- matrix(0, nrow = length(groups), ncol = length(vars))
   rownames(significance_matrix) <- groups
@@ -167,7 +174,6 @@ generate_scatter_plots <- function(data, group_colors, group_name, outcome_matri
     dir.create(relative_folder, showWarnings = FALSE)
     file_name <- file.path(relative_folder, paste0("scatter_", group_name, "_", predictor, ".png"))
 
-
     p <- ggplot(data, aes_string(x = predictor, y = outcome_var, color = "Group")) +
       geom_point(size = 2, alpha = 0.5, shape = 1) + 
       geom_smooth(data = subset(data, Group %in% rownames(outcome_matrix)[outcome_matrix[, predictor] == 1]),
@@ -189,7 +195,6 @@ generate_scatter_plots <- function(data, group_colors, group_name, outcome_matri
       labs(x = predictor, y = outcome_var)
 
     p <- ggMarginal(p, type = "density", margins = "both", groupColour = TRUE, groupFill = TRUE)
-
     ggsave(file_name, plot = p, width = 5, height = 5, dpi = 300)
 
     cat(sprintf("Group: %s | Predictor: %s | Slope:\n", group_name, predictor))
@@ -197,13 +202,17 @@ generate_scatter_plots <- function(data, group_colors, group_name, outcome_matri
       subset_data <- subset(data, Group == group)
       model <- lm(as.formula(paste(outcome_var, "~", predictor)), data = subset_data)
       slope <- coef(model)[2]
-      cat(sprintf("  %s: %.4f\n", group, slope))
+      slopep <- summary(model)$coefficients[2, 4]
+      cat(sprintf("  %s: slope=%.4f, p=%.4f\n", group, slope, slopep))
     }
 
     cat(sprintf("![](%s)\n\n", file_name))
   }
 }
+```
 
+## 显示拟合图和斜率
+```{r, results='asis'}
 generate_scatter_plots(sub1data, colors_3group, "3group_IC", matrix_3group_IC, paste0(file_path, 'scatterplots'))
 generate_scatter_plots(sub1data, colors_3group, "3group_WS", matrix_3group_WS, paste0(file_path, 'scatterplots'))
 generate_scatter_plots(sub2data, colors_4group, "4group_IC", matrix_4group_IC, paste0(file_path, 'scatterplots'))
