@@ -1,7 +1,7 @@
 ---
 title: "Results_corr&glm"
 author: 'XinHao'
-date: "2025-08-20"
+date: "2025-08-27"
 output: html_document
 ---
 
@@ -25,7 +25,7 @@ for (pkg in packages) {
 ```{r loaddata, message=FALSE, warning=FALSE}
 # Load simulation data
 file_path <- "C:/Users/XinHao/Desktop/2025_SCZ_AI/simulation/"
-nd_data <- read_csv(paste0(file_path, 'nd_sim_17apr.csv'))
+nd_data <- read_csv(paste0(file_path, 'nd_sim_26aug.csv'))
 sub1data <- subset(nd_data, Group %in% c('HC', 'PS', 'NS'))
 sub1data$Group <- factor(sub1data$Group, levels = c('HC', 'PS', 'NS'))
 sub2data <- subset(nd_data, Group %in% c('HC', 'PS', 'BA', 'WD'))
@@ -170,7 +170,7 @@ generate_scatter_plots <- function(data, group_colors, group_name, outcome_matri
   for (predictor in vars) {
     outcome_var <- sub(".*_", "", group_name)  # 提取 IC 或 WS
 
-    relative_folder <- "plots"
+    relative_folder <- "simulation/plots"
     dir.create(relative_folder, showWarnings = FALSE)
     file_name <- file.path(relative_folder, paste0("scatter_", group_name, "_", predictor, ".png"))
 

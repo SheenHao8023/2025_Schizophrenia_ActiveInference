@@ -20,6 +20,7 @@ for (pkg in packages) {
     library(pkg, character.only = TRUE)
   }
 }
+set.seed(8023) 
 ```
 
 ## 计算归一化后的指标并写入
@@ -59,6 +60,202 @@ main_data <- main_data %>%
 write.xlsx(main_data, main_file, overwrite = TRUE)
 ```
 
+```{r statsfunc}
+# 通用卡方检验置换检验函数（支持多分类变量）
+chi_square_perm_test <- function(data, var, group_var = "Group2", B = 1000) {
+  tab <- table(data[[group_var]], data[[var]])
+  complete_cases <- complete.cases(data[[group_var]], data[[var]])
+  data_complete <- data[complete_cases, ]
+  tab <- table(data_complete[[group_var]], data_complete[[var]])
+  n <- sum(tab)
+  r <- nrow(tab)  # 组数
+  c <- ncol(tab)  # 变量类别数
+  cat("列联表维度:", r, "×", c, "\n")
+  chi_real <- chisq.test(tab, simulate.p.value = n < 50)
+  chi_stat_real <- chi_real$statistic
+  p_real <- chi_real$p.value
+  cramer_v_real <- sqrt(chi_stat_real / (n * (min(r, c) - 1)))  #效应量
+  
+  perm_stats <- numeric(B)
+  for (i in 1:B) {
+    perm_groups <- sample(data_complete[[group_var]])
+    tab_perm <- table(perm_groups, data_complete[[var]])
+    chi_perm <- suppressWarnings(chisq.test(tab_perm, simulate.p.value = FALSE))
+    perm_stats[i] <- chi_perm$statistic
+  }
+  
+  p_perm <- mean(perm_stats >= chi_stat_real)
+  list(variable = var,chi_square = as.numeric(chi_stat_real),df = chi_real$parameter,
+      p_value = p_real,p_permutation = p_perm,cramers_v = cramer_v_real,contingency_table = tab,
+      n = n,dimensions = c(r, c), B = B)
+}
+
+# 优化卡方检验打印函数（支持多分类变量）
+print_chi_result <- function(res) {
+  cat("\n", rep("=", 70), "\n", sep = "")
+  cat("变量:", res$variable, "(", res$dimensions[1], "×", res$dimensions[2], "表格)\n")
+  cat(rep("-", 70), "\n", sep = "")
+  
+  cat("列联表（频数）:\n")
+  print(res$contingency_table)
+  cat("\n行百分比(%):\n")
+  prop_tab <- prop.table(res$contingency_table, margin = 1) * 100
+  print(round(prop_tab, 1))
+  
+  cat(sprintf("\n卡方检验: χ²(%.0f) = %.2f, p = %.3f", res$df, res$chi_square, res$p_value))
+  cat(sprintf("\n置换检验: p = %.4f (基于%d次置换)", res$p_permutation, res$B))
+  cat(sprintf("\n效应量: Cramér's V = %.3f", res$cramers_v))
+  cat("样本量: n =", res$n, "\n")
+  
+  # 检查期望频数（对于多分类变量很重要）
+  expected <- chisq.test(res$contingency_table)$expected
+  min_expected <- min(expected)
+  cat("最小期望频数:", round(min_expected, 2))
+  if (min_expected < 5) {
+    cat(" ⚠️  (注意：有期望频数小于5的单元格)\n")
+  } else {
+    cat(" ✓\n")
+  }
+  
+  cat(rep("=", 70), "\n\n", sep = "")
+}
+
+# 2-paired sample Wilcoxon Permutation Test
+wilcoxon_perm_test <- function(df, var1, var2, B = 1000) {
+  test_real <- wilcox.test(df[[var1]], df[[var2]], paired = TRUE, exact = FALSE, correct = FALSE)
+  W_real <- test_real$statistic
+  diffs <- df[[var1]] - df[[var2]]
+  n <- sum(!is.na(diffs))
+  mu_w <- n*(n+1)/4
+  
+  W_perm <- replicate(B, {
+    s <- sample(c(1,-1), n, replace = TRUE)
+    d <- s * abs(diffs)           # 符号翻转法
+    as.numeric(wilcox.test(d, mu = 0, exact = FALSE, correct = FALSE)$statistic)
+  })
+  p_val <- (sum(abs(W_perm - mu_w) >= abs(W_real - mu_w)) + 1) / (B + 1)
+  list(W = W_real, p = p_val, n = n, mean_diff = mean(diffs, na.rm = TRUE))
+}
+
+# 2-independent sample Mann-Whitney Permutation Test  独立分组
+mannwhitney_perm_test <- function(df, var, group_var = "Group2", g1, g2, B = 1000) {
+  df <- df[!is.na(df[[var]]) & !is.na(df[[group_var]]), c(var, group_var)]
+  x <- df[[var]][df[[group_var]] == g1]
+  y <- df[[var]][df[[group_var]] == g2]
+  n1 <- length(x)
+  n2 <- length(y)
+  
+  # 合并样本，计算秩
+  combined <- c(x, y)
+  ranks <- rank(combined, ties.method = "average")
+  R1 <- sum(ranks[1:n1])
+  R2 <- sum(ranks[(n1+1):(n1+n2)])
+  U1 <- n1*n2 + n1*(n1+1)/2 - R1
+  U2 <- n1*n2 + n2*(n2+1)/2 - R2
+  U_real <- min(U1, U2)  # 永远非负
+  mu_u <- n1*n2/2        # 期望胜出次数
+  
+  u_perm <- numeric(B)
+  total_n <- n1 + n2
+  for(i in 1:B) {
+    perm_sample <- sample(combined, total_n, replace = FALSE)
+    ranks_perm <- rank(perm_sample, ties.method = "average")
+    R1p <- sum(ranks_perm[1:n1])
+    R2p <- sum(ranks_perm[(n1+1):total_n])
+    U1p <- n1*n2 + n1*(n1+1)/2 - R1p
+    U2p <- n1*n2 + n2*(n2+1)/2 - R2p
+    u_perm[i] <- min(U1p, U2p)
+  }
+  p_val <- (sum(abs(u_perm - mu_u) >= abs(U_real - mu_u)) + 1) / (B + 1)
+  r_rb <- abs(2*U_real/(n1*n2) - 1) # 效应量rank-biserial correlation的绝对值
+  list(U = U_real, p = p_val, n1 = n1, n2 = n2, r_rb = r_rb)
+}
+
+# 3-sample Kruskal-Wallis Permutation Test
+kruskal_perm_test <- function(data, var, group_var = "Group2", B = 1000) {
+  f <- as.formula(paste(var, "~", group_var))
+  kw <- kruskal.test(f, data = data)
+  n <- sum(!is.na(data[[var]]))
+  k <- length(unique(na.omit(data[[group_var]])))
+  eta2 <- (kw$statistic - (k - 1)) / (n - 1)  # 效应量
+  if (eta2 < 0) eta2 <- 0 
+  perm_stats <- replicate(B, {
+    data_perm <- data
+    data_perm[[group_var]] <- sample(data_perm[[group_var]])
+    kruskal.test(f, data = data_perm)$statistic
+  })
+  
+  p_value <- mean(perm_stats >= kw$statistic)  #单侧检验
+  if (p_value == 0) p_value <- 1/(B+1)  
+  sig <- p_value < 0.05
+  res <- list(var = var, kw_stat = kw$statistic, kw_p = p_value, sig = sig,
+              groups = unique(data[[group_var]]),eta2 = as.numeric(eta2))
+  
+  # 如果显著则进行两两比较
+  if (sig && length(res$groups) >= 2) {
+    pairs <- combn(res$groups, 2, simplify = FALSE)
+    pair_results <- list()
+    for (i in seq_along(pairs)) {
+      p <- pairs[[i]]
+      test <- mannwhitney_perm_test(data, var, g1 = p[1], g2 = p[2], B = B)
+      pair_results[[i]] <- list(pair = paste(p[1], p[2], sep = " vs "),U = test$U,raw_p = test$p,
+                                n1 = test$n1,n2 = test$n2)
+    }
+    
+    raw_ps <- sapply(pair_results, function(x) x$raw_p)
+    adj_ps <- p.adjust(raw_ps, method = "bonferroni")  # Bonferroni校正
+    for (i in seq_along(pair_results)) {
+      pair_results[[i]]$adj_p <- adj_ps[i]
+      pair_results[[i]]$sig <- adj_ps[i] < 0.05
+    }
+    res$pairwise <- pair_results
+  }
+  return(res)
+}
+
+# 优化KW单向方差分析打印函数
+print_kw_result <- function(res) {
+  cat("\n", rep("=", 50), "\n", sep = "")
+  cat("变量:", res$var, "\n")
+  cat(rep("-", 50), "\n", sep = "")
+  cat(sprintf("Kruskal-Wallis检验: H = %.2f, p = %.3f, eta² = %.3f", 
+              res$kw_stat, res$kw_p, res$eta2))
+  cat(ifelse(res$sig, " (显著)*\n", " (不显著)\n"))
+  cat("各组样本量: ")
+  group_counts <- table(main_data$Group2[!is.na(main_data[[res$var]])])
+  cat(paste(names(group_counts), "=", group_counts, collapse = ", "), "\n")
+  if (res$sig && !is.null(res$pairwise)) {
+    cat("\n两两比较 (Bonferroni校正):\n")
+    cat(rep("-", 30), "\n", sep = "")
+    for (p in res$pairwise) {
+      sig_symbol <- ifelse(p$sig, "*", "")
+      cat(sprintf("%-20s: U = %6.1f, raw_p = %6.4f, adj_p = %6.4f%s\n",
+                  p$pair, p$U, p$raw_p, p$adj_p, sig_symbol))
+    }
+  }
+  cat(rep("=", 50), "\n\n", sep = "")
+}
+```
+
+
+```{r chi2}
+variables <- c("Gender(1m2f)", "Education(1a2b)", "NumDrugs")  # 可以添加多分类变量
+B = 1000
+cat("开始卡方置换检验（支持多分类变量）...\n")
+results <- list()
+for (var in variables) {
+  if (var %in% names(main_data)) {
+    cat("\n正在分析变量:", var, "\n")
+    res <- chi_square_perm_test(main_data, var)
+    print_chi_result(res)
+    results[[var]] <- res
+  } else {
+    cat("\n变量", var, "不存在于数据中，跳过\n")
+  }
+}
+```
+
+
 ```{r, results='asis'}
 ########### EmpiricalPlot_SymptomsRaw #############
 main_data$`PANSS_P1.+.P3.(psychotic)` <- as.numeric(main_data$`PANSS_P1.+.P3.(psychotic)`)
@@ -66,10 +263,10 @@ main_data$`PANSS_N2.+.N4.(withdrawal)` <- as.numeric(main_data$`PANSS_N2.+.N4.(w
 main_data$`PANSS_N1.(blunted.affect)` <- as.numeric(main_data$`PANSS_N1.(blunted.affect)`)
 main_data$PANSS_Total <- as.numeric(main_data$PANSS_Total)
 data <- data.frame( 
-  "A" = c(main_data$`PANSS_P1.+.P3.(psychotic)`[21:24], 0,  main_data$`PANSS_P1.+.P3.(psychotic)`[21:24], main_data$`PANSS_P1.+.P3.(psychotic)`[13:20]),
-  "B" = c(main_data$`PANSS_N2.+.N4.(withdrawal)`[21:24], 0,  main_data$`PANSS_N2.+.N4.(withdrawal)`[21:24], main_data$`PANSS_N2.+.N4.(withdrawal)`[13:20]),
-  "C" = c(main_data$`PANSS_N1.(blunted.affect)`[21:24]*2, 0,  main_data$`PANSS_N1.(blunted.affect)`[21:24]*2, main_data$`PANSS_N1.(blunted.affect)`[13:20]*2))
-data$Group <- c(rep("BA", 2), rep("WD", 2), rep('NA', 1), rep("NS", 4), rep("PS", 8))
+  "A" = c(main_data$`PANSS_P1.+.P3.(psychotic)`[25:32], 0,  main_data$`PANSS_P1.+.P3.(psychotic)`[25:32], main_data$`PANSS_P1.+.P3.(psychotic)`[17:24]),
+  "B" = c(main_data$`PANSS_N2.+.N4.(withdrawal)`[25:32], 0,  main_data$`PANSS_N2.+.N4.(withdrawal)`[25:32],main_data$`PANSS_N2.+.N4.(withdrawal)`[17:24]),
+  "C" = c(main_data$`PANSS_N1.(blunted.affect)`[25:32]*2, 0,  main_data$`PANSS_N1.(blunted.affect)`[25:32]*2, main_data$`PANSS_N1.(blunted.affect)`[17:24]*2))
+data$Group <- c(rep("BA", 4), rep("WD",4), rep('NA', 1), rep("NS", 8), rep("PS", 8))
 data_long <- data %>%
   pivot_longer(cols = -Group, names_to = "Metric", values_to = "Value")
 summary_data <- data_long %>%
@@ -96,8 +293,8 @@ SymptomsRaw <- ggplot(summary_data, aes(x = Group, y = mean, fill = Metric)) +
         axis.ticks = element_line(color = 'black', size = 0.75),
         axis.text = element_text(size = 12, color = "black", face = 'plain'),  
         axis.title = element_text(size = 14, face = 'plain')) +
-  geom_rect(aes(xmin=0.5, xmax=2.5,ymin=-0.2,ymax=8.5), fill = NA, color='black', linetype = 'dashed', size=0.75) + 
-  geom_rect(aes(xmin=3.5, xmax=4.5,ymin=-0.2,ymax=8.5), fill = NA, color='black', linetype = 'dashed', size=0.75)
+  geom_rect(aes(xmin=0.5, xmax=2.5,ymin=-0.2,ymax=10.45), fill = NA, color='black', linetype = 'dashed', size=0.75) + 
+  geom_rect(aes(xmin=3.5, xmax=4.5,ymin=-0.2,ymax=10.45), fill = NA, color='black', linetype = 'dashed', size=0.75)
 ggsave(filename = file.path(basepath, "EmpiricalPlot_SymptomsRaw.png"),  width = 6, height = 4, dpi = 500)
 print(SymptomsRaw)
 ```
@@ -109,11 +306,10 @@ main_data$`PANSS_N2.+.N4.(withdrawal)` <- as.numeric(main_data$`PANSS_N2.+.N4.(w
 main_data$`PANSS_N1.(blunted.affect)` <- as.numeric(main_data$`PANSS_N1.(blunted.affect)`)
 main_data$PANSS_Total <- as.numeric(main_data$PANSS_Total)
 data <- data.frame( 
-  "A" = c(main_data$`PANSS_P1.+.P3.(psychotic)`[13:20]/(2*main_data$PANSS_Total[13:20]), 0,  main_data$`PANSS_P1.+.P3.(psychotic)`[21:24]/(2*main_data$PANSS_Total[21:24])),
-  "B" = c((main_data$`PANSS_N2.+.N4.(withdrawal)`[13:20] + main_data$`PANSS_N1.(blunted.affect)`[13:20])/(3*main_data$PANSS_Total[13:20]), 
-          0, 
-          (main_data$`PANSS_N2.+.N4.(withdrawal)`[21:24] + main_data$`PANSS_N1.(blunted.affect)`[21:24])/(3*main_data$PANSS_Total[21:24])))
-data$Group <- c(rep("PS", 8), rep('NA', 1), rep("NS", 4))
+  "A" = c(main_data$`PANSS_P1.+.P3.(psychotic)`[17:24]/(2*main_data$PANSS_Total[17:24]), 0,  main_data$`PANSS_P1.+.P3.(psychotic)`[25:32]/(2*main_data$PANSS_Total[25:32])),
+  "B" = c((main_data$`PANSS_N2.+.N4.(withdrawal)`[17:24] + main_data$`PANSS_N1.(blunted.affect)`[17:24])/(3*main_data$PANSS_Total[17:24]), 
+          0, (main_data$`PANSS_N2.+.N4.(withdrawal)`[25:32] + main_data$`PANSS_N1.(blunted.affect)`[25:32])/(3*main_data$PANSS_Total[25:32])))
+data$Group <- c(rep("PS", 8), rep('NA', 1), rep("NS", 8))
 data_long <- data %>%
   pivot_longer(cols = -Group, names_to = "Metric", values_to = "Value")
 summary_data <- data_long %>%
@@ -143,46 +339,94 @@ ggsave(filename = file.path(basepath, "EmpiricalPlot_SymptomsRelative.png"),  wi
 print(SymptomsRelative)
 ```
 
+## PANSS总分柱状图
+```{r, results='asis'}
+# PANSS_Total bar plot
+main_data$PANSS_Total <- as.numeric(main_data$PANSS_Total)
+data <- data.frame(
+  "PANSS_Total" = c(main_data$PANSS_Total[25:32], main_data$PANSS_Total[17:24]),
+  "Group" = c(rep("PS", 8), rep("NS", 8))
+)
+data_long <- data %>%
+  pivot_longer(cols = -Group, names_to = "Metric", values_to = "Value")
+summary_data <- data_long %>%
+  group_by(Metric, Group) %>%
+  summarise(mean = mean(Value), n = n(), se = sd(Value)/sqrt(n()), .groups = 'drop')
+summary_data$Group <- factor(summary_data$Group, levels = c('PS', 'NS'))
+data_long$Group <- factor(data_long$Group, levels = c('PS', 'NS'))
+PANSS_Total_Plot <- ggplot(summary_data, aes(x = Group, y = mean, fill = Group)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.9), 
+           width = 0.7, colour = NA) + 
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), 
+                width = 0.4, position = position_dodge(width = 0.9), 
+                linewidth = 0.7, na.rm = TRUE) + 
+  geom_jitter(data = data_long, aes(x = Group, y = Value, fill = Group), 
+              position = position_jitter(width = 0.2), 
+              alpha = 1, fill = 'black', color = 'black', size = 1.5, shape = 21) + 
+  scale_fill_manual(values = c('PS' = '#fc8d62', 'NS' = '#4169E1'), 
+                    name = "Group", labels = c('PS', 'NS')) + 
+  scale_x_discrete(labels = c('PS', 'NS')) + 
+  coord_cartesian(ylim = c(0, 100)) +
+  labs(x = NULL, y = "PANSS Total Score") +
+  theme_minimal() +
+  theme(legend.position = 'none',  # 隐藏图例，因为x轴已经标注了组别
+    axis.line = element_line(color = 'black', size = 0.75),
+    axis.ticks = element_line(color = 'black', size = 0.75),
+    axis.text = element_text(size = 12, color = "black", face = 'plain'),  
+    axis.title = element_text(size = 14, face = 'plain'),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank()
+  )
+ggsave(filename = file.path(basepath, "EmpiricalPlot_PANSSTotal.png"), width = 2, height = 4, dpi = 500)
+print(PANSS_Total_Plot)
+
+
+```
+
 ## 症状学指标的非参数置换检验统计
-```{r stats}
-set.seed(8023)
+```{r 2group/3group test}
 main_data$Group2 <- ifelse(main_data$Group %in% c("NS_BA", "NS_WD"), "NS", main_data$Group)
 main_data$PANSS_Positive_ave <- main_data$`PANSS_P1.+.P3.(psychotic)`/2
 main_data$PANSS_Negative_ave <- (main_data$`PANSS_N2.+.N4.(withdrawal)` + main_data$`PANSS_N1.(blunted.affect)`) /3
-# 2-paired sample Wilcoxon Permutation Test
-wilcoxon_perm_test <- function(df, var1, var2, B = 1000) {
-  w_real <- wilcox.test(df[[var1]], df[[var2]], paired = TRUE, exact = FALSE)$statistic
-  diffs <- df[[var1]] - df[[var2]]
-  n <- length(diffs)
-  w_perm <- replicate(B, {
-    signs <- sample(c(1,-1), n, replace = TRUE)
-    perm1 <- df[[var2]] + signs * abs(diffs)
-    wilcox.test(perm1, df[[var2]], paired = TRUE, exact = FALSE)$statistic
-  })
-  p_val <- min(1, 2 * min(mean(w_perm <= w_real), mean(w_perm >= w_real)))
-  list(W = w_real, p = p_val)}
-# 应用到 PS 和 NS
-for (g in c("PS","NS")) {
-  res <- wilcoxon_perm_test(subset(main_data, Group2 == g), "PANSS_Positive_ave", "PANSS_Negative_ave")
-  cat("====", g, "====\n","W =", res$W, "\n","p =", res$p, "\n\n")}
 
-# 2-independent sample Mann-Whitney Permutation Test
-mannwhitney_perm_test <- function(df, var, group_var = "Group2", g1, g2, B = 1000) {
-  x <- df[[var]][df[[group_var]] == g1]
-  y <- df[[var]][df[[group_var]] == g2]
-  u_real <- wilcox.test(x, y, paired = FALSE, exact = FALSE)$statistic
-  combined <- c(x, y)
-  n1 <- length(x)
-  u_perm <- sapply(1:B, function(i) {  # 改用 sapply 返回向量
-    idx <- sample(length(combined)) <= n1
-    wilcox.test(combined[idx], combined[!idx], paired = FALSE, exact = FALSE)$statistic
-  })
-  p_val <- min(1, 2 * min(mean(u_perm <= u_real), mean(u_perm >= u_real)))
-  list(U = u_real, p = p_val)}
-# 应用到3个得分变量
+# 应用到 PS 和 NS 组
+for (g in c("PS", "NS")) {
+  group_data <- subset(main_data, Group2 == g)
+  group_data <- group_data[!is.na(group_data$PANSS_Positive_ave) & !is.na(group_data$PANSS_Negative_ave), ]
+  res <- wilcoxon_perm_test(group_data, "PANSS_Positive_ave", "PANSS_Negative_ave")
+  cat("====", g, "组 PANSS阳性 vs 阴性平均分比较 ====\n")
+  cat("样本量: n =", res$n, "\n")
+  cat("平均差异:", round(res$mean_diff, 3), "\n")
+  cat("W统计量 =", round(res$W, 3), "\n")
+  cat("p值 =", format.pval(res$p, digits = 4, eps = 0.0001), "\n")
+}
+
+# 应用到3个与筛选相关的PANSS项目得分变量
+cat("=== 组内分析 PANSS筛选相关变量 ===\n")
 for (var in c("PANSS_Positive_ave", "PANSS_Negative_ave", "PANSS_Total")) {
   res <- mannwhitney_perm_test(main_data, var, g1 = "PS", g2 = "NS")
-  cat("====", var, "====\nU =", res$U, "\np =", res$p, "\n\n")}
+  cat("变量:", var, 
+      "| U =", round(res$U, 2), 
+      "| p =", format.pval(res$p, digits = 3, eps = 0.0001),
+      "| n(PS) =", res$n1,
+      "| n(NS) =", res$n2, 
+      "| ES =", round(res$r_rb, 3), "\n")
+}
+
+# 应用到症状学表格
+cat("\n=== 症状学表格变量 ===\n")
+for (var in c("OZP(mg/day)", "PANSS_Total", "PANSS_Positive", "PANSS_Negative", 
+              "PosiDimension", "NegaDimension", "PANSS_P1.+.P3.(psychotic)", 
+              "PANSS_N2.+.N4.(withdrawal)", "PANSS_N1.(blunted.affect)", "RSESE")) {
+  res <- mannwhitney_perm_test(main_data, var, g1 = "PS", g2 = "NS")
+  cat("变量:", var, 
+      "| U =", round(res$U, 2), 
+      "| p =", format.pval(res$p, digits = 3, eps = 0.0001),
+      "| n(PS) =", res$n1,
+      "| n(NS) =", res$n2, 
+      "| ES =", round(res$r_rb, 3), "\n")
+}
 ```
 
 ## 建立行为数据绘图函数
@@ -191,11 +435,11 @@ for (var in c("PANSS_Positive_ave", "PANSS_Negative_ave", "PANSS_Total")) {
 plot_empirical <- function(data_column, y_label, file_name, height) {
   data <- data.frame(
     group = factor(
-      c(rep('HC',12), rep('PS',8), rep('NS',4), rep('NA',1), rep('BA',2), rep('WD',2)),
+      c(rep('HC',16), rep('PS',8), rep('NS',8), rep('NA',1), rep('BA',4), rep('WD',4)),
       levels = c('HC','PS','NS','NA','BA','WD')),
-    exp = c(main_data[[data_column]][1:12], main_data[[data_column]][13:20],
-            main_data[[data_column]][21:24],  0,
-            main_data[[data_column]][21:22],  main_data[[data_column]][23:24]))
+    exp = c(main_data[[data_column]][1:16], main_data[[data_column]][17:24],
+            main_data[[data_column]][25:32],  0,
+            main_data[[data_column]][25:28],  main_data[[data_column]][29:32]))
   
   p <- ggplot(data = data, mapping = aes(x = factor(group), y = exp, fill = group)) +
     stat_summary(fun = "mean", geom = "bar", width = 0.7, colour = NA, size = 0.9) +
@@ -225,73 +469,26 @@ plot_empirical <- function(data_column, y_label, file_name, height) {
 ## 行为指标统计图展示
 ```{r, results='asis'}
 plot_empirical("IC_scaled", "IC", "EmpiricalPlot_IC.png", 0.4)
-plot_empirical("WS_scaled", "WS", "EmpiricalPlot_WS.png", 0.65)
-plot_empirical("WSearlier_scaled", "WS with metronome", "EmpiricalPlot_WSearlier.png", 0.75)
+plot_empirical("WS_scaled", "WS", "EmpiricalPlot_WS.png", 0.7)
+plot_empirical("WSearlier_scaled", "WS with metronome", "EmpiricalPlot_WSearlier.png", 0.85)
 plot_empirical("RDearlier_scaled", "RD with metronome", "EmpiricalPlot_RDearlier.png", 1.05)
 ```
 
 
 ## 三组之间的统计检验
 ```{r stat-posthoc}
-# 3-sample Kruskal-Wallis Permutation Test
-kruskal_perm_test <- function(data, var, group_var = "Group2", B = 1000) {
-  # Kruskal-Wallis检验
-  f <- as.formula(paste(var, "~", group_var))
-  kw <- kruskal.test(f, data = data)
-  
-  # 置换检验
-  perm_stats <- replicate(B, {
-    data_perm <- data
-    data_perm[[group_var]] <- sample(data_perm[[group_var]])
-    kruskal.test(f, data = data_perm)$statistic
-  })
-  
-  p_value <- min(1, 2 * min(mean(perm_stats <= kw$statistic), mean(perm_stats >= kw$statistic)))
-  sig <- p_value < 0.05
-  res <- list(var = var, kw_stat = kw$statistic, kw_p = p_value, sig = sig)
-  
-  # 如果显著则两两比较（新增p值校正）
-  if (sig) {
-    groups <- unique(data[[group_var]])
-    pairs <- combn(groups, 2, simplify = FALSE)
-    pair_results <- lapply(pairs, function(p) {
-      test <- mannwhitney_perm_test(data, var, g1 = p[1], g2 = p[2], B = B)
-      list(pair = paste(p[1], p[2], sep = " vs "), U = test$U, raw_p = test$p)
-    })
-    
-    # 对所有两两比较进行Bonferroni校正
-    raw_ps <- sapply(pair_results, function(x) x$raw_p)
-    adj_ps <- p.adjust(raw_ps, method = "bonferroni")
-    
-    # 添加校正后的p值
-    res$pairwise <- lapply(seq_along(pair_results), function(i) {
-      pair_results[[i]]$adj_p <- adj_ps[i]
-      pair_results[[i]]$sig <- adj_ps[i] < 0.05
-      pair_results[[i]]
-    })
-  }
-  return(res)  # 确保返回结果
-}
-
-#优化后的打印函数（显示校正后p值）
-print_result <- function(res) {
-  cat("\n====", res$var, "====\n")
-  cat("KW检验: 统计量=", round(res$kw_stat,2), 
-      " p=", round(res$kw_p,4), 
-      ifelse(res$sig, " (显著)*", " (不显著)"), "\n", sep="")
-  if (res$sig) {
-    cat("\n两两比较(Bonferroni校正后):\n")
-    for (p in res$pairwise) {
-      cat(p$pair, ": U=", round(p$U,2), 
-          " raw_p=", round(p$raw_p,4),
-          " adj_p=", round(p$adj_p,4),
-          ifelse(p$sig, " (显著)*", " (不显著)"), "\n", sep="")}}}
-
-variables <- c("IC_scaled", "WS_scaled", "WSearlier_scaled", "RDearlier_scaled", 
-               "FirstTappingIC", "FirstTappingWS")
+variables <- c("Age", "ISI", "BDI", "IRI_Fantasy", "IRI_EmpathicConcern", "IRI_Perspective",  
+               "IRI_PersonalDistress", "UCLA", "PSP", "LSAS_Anxiety", "LSAS_Avoidance",
+               "SQLS_MotivationEnergy", "SQLS_SymptomSideeffect", "SQLS_PsychosocialFacet", 
+               "Token.Motor.Task", "Digit.Symbol.Test", "Digit.Span.Test_sequence", 
+               "Digit.Span.Test_reverse", "Digit.Span.Test_sum",  "RDearlier_scaled", "WSearlier_scaled", 
+               "IC_scaled", "WS_scaled", "FirstTappingIC", "FirstTappingWS",
+               "QuestionnaireIC", "QuestionnaireWS")
+cat("开始Kruskal-Wallis置换检验...\n")
 for (var in variables) {
   res <- kruskal_perm_test(main_data, var)
-  print_result(res)}
+  print_kw_result(res)
+}
 ```
 
 ## singleshot作图函数
@@ -304,7 +501,7 @@ fill_colors <- c('#66c2a5','#fc8d62','#8da0cb', 'transparent', '#e78ac3','#a6d85
 plot_metric <- function(metric_name, empirical_values, filename, ylim_max, rect_ymax) {
   # empirical data
   emp_data <- data.frame(
-    group = factor(rep(group_levels, times = c(12,8,4,1,2,2)), levels = group_levels),
+    group = factor(rep(group_levels, times = c(16,8,8,1,4,4)), levels = group_levels),
     exp = empirical_values
   )
   emp_summary <- emp_data %>%
@@ -314,7 +511,7 @@ plot_metric <- function(metric_name, empirical_values, filename, ylim_max, rect_
   print(emp_summary[, c("group", "Mean", "SD")])
   
   # load simulation data
-  sim_data <- read_csv(paste0(file_path, 'simulated_performance_ssApr2025.csv')) %>%
+  sim_data <- read_csv(paste0(file_path, 'simulated_performance_ss26Aug2025.csv')) %>%
     filter(group %in% group_levels) %>%
     mutate(group = factor(group, levels = group_levels))
   
@@ -327,7 +524,7 @@ plot_metric <- function(metric_name, empirical_values, filename, ylim_max, rect_
   
   p <- ggplot(data = data_summary, aes(x = group, y = mean_bar, fill = group)) +
     geom_bar(stat = 'identity', position = 'dodge', width = 0.7) +
-    geom_point(data = subset(emp_summary, group != 'NA'), aes(x = group, y = Mean, fill = group), size = 2) +
+    geom_point(data = subset(emp_summary, group != 'NA'), aes(x = group, y = Mean, fill = group), size = 1.5) +
     geom_errorbar(data = subset(emp_summary, group != 'NA'), 
                   aes(x = group, ymin = Mean - SD, ymax = Mean + SD), 
                   inherit.aes = FALSE, width = 0.4, size = 0.7, color = "black") +
@@ -353,10 +550,10 @@ plot_metric <- function(metric_name, empirical_values, filename, ylim_max, rect_
 ## SS统计图展示
 ```{r, results='asis'}
 # 1. IC 
-emp_values_IC <- c(main_data$IC_scaled[1:12], main_data$IC_scaled[13:20], main_data$IC_scaled[21:24], 0, main_data$IC_scaled[21:22],main_data$IC_scaled[23:24])
+emp_values_IC <- c(main_data$IC_scaled[1:16], main_data$IC_scaled[17:24], main_data$IC_scaled[25:32], 0, main_data$IC_scaled[25:28],main_data$IC_scaled[29:32])
 plot_metric("IC", emp_values_IC, "SS_IC.png", ylim_max = 1, rect_ymax = 0.4)
 # 2. WS
-emp_values_WS <- c(main_data$WS_scaled[1:12], main_data$WS_scaled[13:20], main_data$WS_scaled[21:24], 0, main_data$WS_scaled[21:22],main_data$WS_scaled[23:24])
-plot_metric("WS", emp_values_WS, "SS_WS.png", ylim_max = 1, rect_ymax = 0.7)
+emp_values_WS <- c(main_data$WS_scaled[1:16], main_data$WS_scaled[17:24], main_data$WS_scaled[25:32], 0, main_data$WS_scaled[25:28],main_data$WS_scaled[29:32])
+plot_metric("WS", emp_values_WS, "SS_WS.png", ylim_max = 1, rect_ymax = 0.65)
 ```
 
