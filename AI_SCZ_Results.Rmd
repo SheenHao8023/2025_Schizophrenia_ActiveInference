@@ -1,14 +1,13 @@
 ---
 title: "AI_SCZ_Results"
 author: "XinHao"
-date: "2025-09-20"
+date: "2025-10-11"
 output: html_document
 ---
 
 ## 使用到的包
 ```{r packages}
-packages <- c("ggprism", "ggsci", "ggpubr", "ggplot2", "dplyr", "tidyr", "readr", "readxl", "openxlsx", "stringr", "ggExtra", "bruceR", "emmeans", "corrplot", "patchwork","tidyverse",
-"fitdistrplus", "transport", "philentropy")  
+packages <- c("ggprism", "actuar", "EnvStats", "statmod", "SuppDists", "ggsci", "ggpubr", "ggplot2", "dplyr", "tidyr", "readr", "readxl", "openxlsx", "stringr", "ggExtra", "bruceR", "emmeans", "corrplot", "patchwork", "tidyverse", "fitdistrplus", "transport", "philentropy", "lm.beta")  
 for (pkg in packages) {
   if (!require(pkg, character.only = TRUE)) {
     install.packages(pkg, dependencies = TRUE)
@@ -59,7 +58,7 @@ write.xlsx(main_data, main_file, overwrite = TRUE)
 
 ```{r statsfunc}
 # 通用卡方检验置换检验函数（支持多分类变量）
-chi_square_perm_test <- function(data, var, group_var = "Group2", B = 1000) {
+chi_square_perm_test <- function(data, var, group_var = "Group2", B = 10000) {
   tab <- table(data[[group_var]], data[[var]])
   complete_cases <- complete.cases(data[[group_var]], data[[var]])
   data_complete <- data[complete_cases, ]
@@ -99,7 +98,7 @@ print_chi_result <- function(res) {
   prop_tab <- prop.table(res$contingency_table, margin = 1) * 100
   print(round(prop_tab, 1))
   
-  cat(sprintf("\n卡方检验: χ²(%.0f) = %.2f, p = %.3f", res$df, res$chi_square, res$p_value))
+  cat(sprintf("\n卡方检验: χ²(%.0f) = %.2f, p = %.4f", res$df, res$chi_square, res$p_value))
   cat(sprintf("\n置换检验: p = %.4f (基于%d次置换)", res$p_permutation, res$B))
   cat(sprintf("\n效应量: Cramér's V = %.3f", res$cramers_v))
   cat("样本量: n =", res$n, "\n")
@@ -118,7 +117,7 @@ print_chi_result <- function(res) {
 }
 
 # 2-paired sample Wilcoxon Permutation Test
-wilcoxon_perm_test <- function(df, var1, var2, B = 1000) {
+wilcoxon_perm_test <- function(df, var1, var2, B = 10000) {
   test_real <- wilcox.test(df[[var1]], df[[var2]], paired = TRUE, exact = FALSE, correct = FALSE)
   W_real <- test_real$statistic
   diffs <- df[[var1]] - df[[var2]]
@@ -169,7 +168,7 @@ mannwhitney_perm_test <- function(df, var, group_var = "Group2", g1, g2, B = 100
 }
 
 # 3-sample Kruskal-Wallis Permutation Test
-kruskal_perm_test <- function(data, var, group_var = "Group2", B = 1000) {
+kruskal_perm_test <- function(data, var, group_var = "Group2", B = 10000) {
   f <- as.formula(paste(var, "~", group_var))
   kw <- kruskal.test(f, data = data)
   n <- sum(!is.na(data[[var]]))
@@ -200,10 +199,14 @@ kruskal_perm_test <- function(data, var, group_var = "Group2", B = 1000) {
     }
     
     raw_ps <- sapply(pair_results, function(x) x$raw_p)
-    adj_ps <- p.adjust(raw_ps, method = "bonferroni")  # Bonferroni校正
+    adj_ps_bonf <- p.adjust(raw_ps, method = "bonferroni")
+    adj_ps_fdr  <- p.adjust(raw_ps, method = "fdr")
+    
     for (i in seq_along(pair_results)) {
-      pair_results[[i]]$adj_p <- adj_ps[i]
-      pair_results[[i]]$sig <- adj_ps[i] < 0.05
+      pair_results[[i]]$p_raw  <- raw_ps[i]
+      pair_results[[i]]$p_fdr  <- adj_ps_fdr[i]
+      pair_results[[i]]$p_bonf <- adj_ps_bonf[i]
+      pair_results[[i]]$sig <- adj_ps_bonf[i] < 0.05  # 默认显著性依据Bonf
     }
     res$pairwise <- pair_results
   }
@@ -215,19 +218,19 @@ print_kw_result <- function(res) {
   cat("\n", rep("=", 50), "\n", sep = "")
   cat("变量:", res$var, "\n")
   cat(rep("-", 50), "\n", sep = "")
-  cat(sprintf("Kruskal-Wallis检验: H = %.2f, p = %.3f, eta² = %.3f", 
+  cat(sprintf("Kruskal-Wallis检验: H = %.2f, p = %.4f, eta² = %.3f", 
               res$kw_stat, res$kw_p, res$eta2))
   cat(ifelse(res$sig, " (显著)*\n", " (不显著)\n"))
   cat("各组样本量: ")
   group_counts <- table(main_data$Group2[!is.na(main_data[[res$var]])])
   cat(paste(names(group_counts), "=", group_counts, collapse = ", "), "\n")
   if (res$sig && !is.null(res$pairwise)) {
-    cat("\n两两比较 (Bonferroni校正):\n")
-    cat(rep("-", 30), "\n", sep = "")
+    cat("\n两两比较 (Raw / FDR / Bonferroni 校正):\n")
+    cat(rep("-", 50), "\n", sep = "")
     for (p in res$pairwise) {
       sig_symbol <- ifelse(p$sig, "*", "")
-      cat(sprintf("%-20s: U = %6.1f, raw_p = %6.4f, adj_p = %6.4f%s\n",
-                  p$pair, p$U, p$raw_p, p$adj_p, sig_symbol))
+      cat(sprintf("%-20s: U = %6.1f, raw_p = %6.4f, FDR_p = %6.4f, Bonf_p = %6.4f%s\n",
+                  p$pair, p$U, p$p_raw, p$p_fdr, p$p_bonf, sig_symbol))
     }
   }
   cat(rep("=", 50), "\n\n", sep = "")
@@ -405,7 +408,7 @@ for (var in c("PANSS_Positive_ave", "PANSS_Negative_ave", "PANSS_Total")) {
   res <- mannwhitney_perm_test(main_data, var, g1 = "PS", g2 = "NS")
   cat("变量:", var, 
       "| U =", round(res$U, 2), 
-      "| p =", format.pval(res$p, digits = 3, eps = 0.0001),
+      "| p =", format.pval(res$p, digits = 4, eps = 0.0001),
       "| n(PS) =", res$n1,
       "| n(NS) =", res$n2, 
       "| ES =", round(res$r_rb, 3), "\n")
@@ -419,7 +422,7 @@ for (var in c("OZP(mg/day)", "PANSS_Total", "PANSS_Positive", "PANSS_Negative",
   res <- mannwhitney_perm_test(main_data, var, g1 = "PS", g2 = "NS")
   cat("变量:", var, 
       "| U =", round(res$U, 2), 
-      "| p =", format.pval(res$p, digits = 3, eps = 0.0001),
+      "| p =", format.pval(res$p, digits = 4, eps = 0.0001),
       "| n(PS) =", res$n1,
       "| n(NS) =", res$n2, 
       "| ES =", round(res$r_rb, 3), "\n")
@@ -473,7 +476,7 @@ plot_empirical("RDearlier_scaled", "RD with metronome", "EmpiricalPlot_RDearlier
 
 ## 三组之间的统计检验
 ```{r stat-posthoc}
-variables <- c("Age", "ISI", "BDI", "IRI_Fantasy", "IRI_EmpathicConcern", "IRI_Perspective",  
+variables <- c("Age", "IRI_Fantasy", "IRI_EmpathicConcern", "IRI_Perspective",  
                "IRI_PersonalDistress", "UCLA", "PSP", "LSAS_Anxiety", "LSAS_Avoidance",
                "SQLS_MotivationEnergy", "SQLS_SymptomSideeffect", "SQLS_PsychosocialFacet", 
                "Token.Motor.Task", "Digit.Symbol.Test", "Digit.Span.Test_sequence", 
@@ -486,6 +489,7 @@ for (var in variables) {
   print_kw_result(res)
 }
 ```
+
 ## 绘制时序概率图
 ```{r hiddenstates, results='asis'}
 hiddenstateprobs <- read.csv("C:/Users/XinHao/Desktop/2025_SCZ_AI/simulation/hiddenstateprobs.csv")
@@ -513,6 +517,76 @@ combined_plot <- p1 + p2 + plot_layout(ncol = 2)
 print(combined_plot)
 ggsave("C:/Users/XinHao/Desktop/2025_SCZ_AI/simulation/Hiddenstates_Plot.png",
        combined_plot, width = 16, height = 8, dpi = 300)
+
+
+summary_stats_all <- hiddenstateprobs %>%
+  group_by(group, state) %>%
+  summarise(
+    n = sum(!is.na(probability)),
+    mean = mean(probability, na.rm = TRUE),
+    sd = sd(probability, na.rm = TRUE)
+  ) %>%
+  arrange(state, group)
+print(summary_stats_all)
+
+hiddenstateprobs_sub <- hiddenstateprobs %>%
+  filter(group %in% c("HC", "PS", "NS")) %>%
+  mutate(Group2 = factor(group, levels = c("HC", "PS", "NS")))
+
+states <- unique(hiddenstateprobs_sub$state)
+results <- list()
+
+for (st in states) {
+  dat_sub <- hiddenstateprobs_sub %>% filter(state == st)
+  
+  # ANOVA
+  fit <- aov(probability ~ Group2, data = dat_sub)
+  anova_res <- summary(fit)[[1]]
+  F_val <- anova_res$`F value`[1]
+  p_val <- anova_res$`Pr(>F)`[1]
+  
+  # emmeans 事后比较
+  em <- emmeans(fit, specs = "Group2")
+  
+  # --- 先拿到未校正的p值 ---
+  pairwise_raw <- pairs(em, adjust = "none") |> as.data.frame()
+  
+  # --- 再拿到Bonferroni校正后的p值 ---
+  pairwise_bonf <- pairs(em, adjust = "bonferroni") |> as.data.frame()
+  
+  # 合并两个结果（按对比名称匹配）
+  pairwise_df <- pairwise_raw %>%
+    dplyr::select(contrast, estimate, SE, df, t.ratio, p.value) %>%
+    rename(p_uncorrected = p.value) %>%
+    left_join(pairwise_bonf %>%
+                dplyr::select(contrast, p.value) %>%
+                rename(p_bonferroni = p.value),
+              by = "contrast") %>%
+    mutate(across(c(estimate, SE, df, t.ratio, p_uncorrected, p_bonferroni),
+                  ~ round(.x, 4)))
+  
+  # 样本量
+  n_per_group <- table(dat_sub$Group2)
+  
+  # 保存结果
+  results[[st]] <- list(
+    state = st,
+    ANOVA_F = F_val,
+    ANOVA_p = round(p_val, 4),
+    n_per_group = n_per_group,
+    pairwise = pairwise_df
+  )
+}
+
+# 查看结果示例
+for (st in names(results)) {
+  cat("\n====", st, "====\n")
+  cat("ANOVA: F =", results[[st]]$ANOVA_F, ", p =", results[[st]]$ANOVA_p, "\n")
+  cat("各组样本量:\n")
+  print(results[[st]]$n_per_group)
+  cat("\n事后比较:\n")
+  print(results[[st]]$pairwise)
+}
 ```
 
 ## singleshot作图函数
@@ -645,255 +719,79 @@ plot_metric_violin("WS", emp_values_WS, "ND_WS.png", ylim_max=1, rect_ymax=0.7)
 ```
 
 ## 分布比较
-```{r distribution, results='asis'}
-file_path <- "C:/Users/XinHao/Desktop/2025_SCZ_AI/simulation/"
-group_levels <- c("HC", "PS", "NS", "BA", "WD")
-fill_colors <- c('#66c2a5','#fc8d62','#8da0cb','#e78ac3','#a6d854')
+```{r distribution}
+data <- read_csv("C:/Users/XinHao/Desktop/2025_SCZ_AI/simulation/nd_sim_26aug.csv")
 
-sim_data <- read_csv(paste0(file_path, 'nd_sim_26aug.csv')) %>%
-  filter(Group %in% group_levels) %>%
-  mutate(Group = factor(Group, levels = group_levels))
 
-empirical_data <- data.frame(
-  Group = factor(rep(c("HC", "PS", "NS", "BA", "WD"), 
-                     times = c(16, 8, 8, 4, 4)), levels = group_levels),
-  IC = c(main_data$IC_scaled[1:16], main_data$IC_scaled[17:24], 
-         main_data$IC_scaled[25:32], main_data$IC_scaled[25:28], 
-         main_data$IC_scaled[29:32]),
-  WS = c(main_data$WS_scaled[1:16], main_data$WS_scaled[17:24], 
-         main_data$WS_scaled[25:32], main_data$WS_scaled[25:28], 
-         main_data$WS_scaled[29:32])
-)
+cols_to_test <- c("IC", "WS")
+dists <- c("norm", "lnorm", "gamma", "weibull", "exp", "logis", "cauchy",
+           "beta", "t", "llogis", "burr", "pareto", "ggamma", "invgauss", "johnson")
 
-# 修正bootstrapping：每组生成1000个重采样样本点
-n_boot <- 1000
-kde_results <- list()
-
-for (metric in c("IC", "WS")) {
-  kde_results[[metric]] <- list()
-
-  for (group in group_levels) {
-    cat("Processing", metric, "for group", group, "\n")
-    emp_original <- empirical_data[empirical_data$Group == group, metric]
-    
-    # 修正：从原始样本中重采样生成1000个样本点
-    emp_boot <- sample(emp_original, size = n_boot, replace = TRUE)
-    
-    sim_data_group <- sim_data[sim_data$Group == group, metric][[1]]
-    
-    # 计算KDE
-    bw <- bw.nrd0(c(emp_boot, sim_data_group)) * 3
-    emp_kde <- density(emp_boot, bw = bw, from = 0, to = 1, n = 512)
-    sim_kde <- density(sim_data_group, bw = bw, from = 0, to = 1, n = 512)
-    
-    # 存储结果
-    kde_results[[metric]][[group]] <- list(
-      empirical_kde = data.frame(x = emp_kde$x, y = emp_kde$y),
-      simulated_kde = data.frame(x = sim_kde$x, y = sim_kde$y),
-      empirical_data = emp_boot,  # 1000个重采样样本点
-      simulated_data = sim_data_group,
-      original_data = emp_original  # 保留原始数据用于参考
-    )
-  }
-}
-
-# 在结果中添加原始样本数量信息
-for (metric in c("IC", "WS")) {
-  for (group in group_levels) {
-    # 获取原始样本数量
-    original_n <- length(kde_results[[metric]][[group]]$original_data)
-    cat("Group", group, metric, ":", original_n, "original samples ->", 
-        n_boot, "bootstrap samples\n")
-  }
-}
-
-# 修正距离计算函数，添加Wasserstein置换检验
-calculate_distances <- function(emp_data, sim_data, n_permutations = 1000) {
-  # 计算观察到的Wasserstein距离
-  observed_wasserstein <- wasserstein1d(emp_data, sim_data)
+# 分组拟合并打印结果
+for (col in cols_to_test) {
+  cat("\n==============================\n")
+  cat("变量:", col, "\n")
+  cat("==============================\n")
   
-  # 计算KS检验
-  ks_test <- ks.test(emp_data, sim_data)
-  
-  # Wasserstein置换检验
-  combined_data <- c(emp_data, sim_data)
-  n_emp <- length(emp_data)
-  n_total <- length(combined_data)
-  
-  permuted_wasserstein <- numeric(n_permutations)
-  
-  for (i in 1:n_permutations) {
-    # 随机重排数据
-    permuted_data <- sample(combined_data)
-    perm_emp <- permuted_data[1:n_emp]
-    perm_sim <- permuted_data[(n_emp + 1):n_total]
+  for (grp in unique(data$Group)) {
+    subset_data <- data %>% filter(Group == grp) %>% pull(col)
+    subset_data <- subset_data[!is.na(subset_data) & subset_data > 0]
     
-    # 计算置换后的Wasserstein距离
-    permuted_wasserstein[i] <- wasserstein1d(perm_emp, perm_sim)
-  }
-  
-  # 计算p值（单侧检验）
-  wasserstein_pvalue <- mean(permuted_wasserstein >= observed_wasserstein)
-  
-  return(list(
-    wasserstein_distance = observed_wasserstein,
-    wasserstein_pvalue = wasserstein_pvalue,
-    ks_statistic = ks_test$statistic,
-    ks_pvalue = ks_test$p.value
-  ))
-}
-
-# 分布拟合和比较
-distribution_results <- data.frame()
-
-for (metric in c("IC", "WS")) {
-  for (group in group_levels) {
-    # 获取模拟数据进行分布拟合
-    sim_data_group <- kde_results[[metric]][[group]]$simulated_data
-    
-    # 拟合多种分布并选择最佳拟合
-    distributions <- c("norm", "beta", "gamma", "lnorm", "weibull", "exp", "logis")
-    fits <- list()
-    aics <- numeric()
-    
-    for (i in seq_along(distributions)) {
-      tryCatch({
-        if (distributions[i] == "beta") {
-          # Beta分布需要数据在(0,1)范围内
-          scaled_data <- (sim_data_group - min(sim_data_group)) / 
-                        (max(sim_data_group) - min(sim_data_group))
-          scaled_data <- pmin(pmax(scaled_data, 0.001), 0.999)
-          fits[[i]] <- fitdist(scaled_data, "beta")
-        } else {
-          fits[[i]] <- fitdist(sim_data_group, distributions[i])
-        }
-        aics[i] <- fits[[i]]$aic
-      }, error = function(e) {
-        aics[i] <- NA
-      })
+    fit_list <- list()
+    for (dist in dists) {
+      fit <- tryCatch(fitdist(subset_data, dist), error = function(e) NULL)
+      if (!is.null(fit)) fit_list[[dist]] <- fit
     }
     
-    best_idx <- which.min(aics)
-    best_dist <- ifelse(length(best_idx) > 0, distributions[best_idx], NA)
-    
-    # 计算距离指标（使用置换检验）
-    emp_data <- kde_results[[metric]][[group]]$empirical_data
-    sim_data_vals <- kde_results[[metric]][[group]]$simulated_data
-    
-    dist_metrics <- calculate_distances(emp_data, sim_data_vals, n_permutations = 1000)
-    
-    # 存储所有结果
-    distribution_results <- rbind(distribution_results, data.frame(
-      Metric = metric,
-      Group = group,
-      Best_Distribution = best_dist,
-      Wasserstein_Distance = dist_metrics$wasserstein_distance,
-      Wasserstein_Pvalue = dist_metrics$wasserstein_pvalue,
-      KS_Statistic = dist_metrics$ks_statistic,
-      KS_Pvalue = dist_metrics$ks_pvalue,
-      Empirical_Mean = mean(emp_data),
-      Simulated_Mean = mean(sim_data_vals),
-      Empirical_SD = sd(emp_data),
-      Simulated_SD = sd(sim_data_vals),
-      Empirical_N = length(emp_data),
-      Simulated_N = length(sim_data_vals)
-    ))
+    if (length(fit_list) > 0) {
+      comp <- gofstat(fit_list)
+      best_aic <- names(which.min(comp$aic))
+      best_bic <- names(which.min(comp$bic))
+      
+      # ---- 分位数计算 ----
+      q25 <- quantile(subset_data, 0.25, na.rm = TRUE)
+      q50 <- quantile(subset_data, 0.50, na.rm = TRUE)
+      q75 <- quantile(subset_data, 0.75, na.rm = TRUE)
+      p10 <- quantile(subset_data, 0.10, na.rm = TRUE)
+      p90 <- quantile(subset_data, 0.90, na.rm = TRUE)
+      # ---- 偏度指标 ----
+      skew_q <- as.numeric((q75 + q25 - 2 * q50) / (q75 - q25))   # 中部偏度
+      skew_tail <- as.numeric((p90 + p10 - 2 * q50) / (p90 - p10)) # 尾部偏度
+      # ---- 打印结果 ----
+      cat("\nGroup:", grp, "\n")
+      cat("  AIC最优分布:", best_aic, "\n")
+      cat("  BIC最优分布:", best_bic, "\n")
+      cat("  中部分位数: 25% =", round(q25, 4),
+          "  中位数 =", round(q50, 4),
+          "  75% =", round(q75, 4), "\n")
+      cat("  尾部分位数: 10% =", round(p10, 4),
+          "  90% =", round(p90, 4), "\n")
+      cat("  Bowley Skewness (中部):", round(skew_q, 3),
+          " | Tail Skewness (尾部):", round(skew_tail, 3), "\n")
+      
+      # ---- 判定说明 ----
+      if (abs(skew_q) < 0.1) {
+        cat("  → 中部分布近似对称")
+      } else if (skew_q > 0.1) {
+        cat("  → 中部分布右偏")
+      } else {
+        cat("  → 中部分布左偏")
+      }
+      
+      if (abs(skew_tail) < 0.1) {
+        cat("；尾部近似对称\n")
+      } else if (skew_tail > 0.1) {
+        cat("；尾部右尾较长\n")
+      } else {
+        cat("；尾部左尾较长\n")
+      }
+      
+    } else {
+      cat("\nGroup:", grp, "（数据不适合拟合）\n")
+    }
   }
 }
 
-# 添加显著性标记
-distribution_results <- distribution_results %>%
-  mutate(
-    WS_Significance = ifelse(Wasserstein_Pvalue < 0.001, "***",
-                      ifelse(Wasserstein_Pvalue < 0.01, "**",
-                      ifelse(Wasserstein_Pvalue < 0.05, "*", "n.s."))),
-    KS_Significance = ifelse(KS_Pvalue < 0.001, "***",
-                      ifelse(KS_Pvalue < 0.01, "**",
-                      ifelse(KS_Pvalue < 0.05, "*", "n.s."))),
-    # 检查p值是否合理
-    Pvalue_Check = ifelse(KS_Pvalue > 1 | Wasserstein_Pvalue > 1, "ERROR: Pvalue > 1", 
-                   ifelse(KS_Pvalue < 0 | Wasserstein_Pvalue < 0, "ERROR: Pvalue < 0", "OK"))
-  )
-
-# 打印详细结果
-print(distribution_results)
-
-# 检查是否有异常的p值
-problematic <- distribution_results %>% filter(Pvalue_Check != "OK")
-if (nrow(problematic) > 0) {
-  cat("Warning: Found problematic p-values:\n")
-  print(problematic)
-} else {
-  cat("All p-values are within valid range (0-1)\n")
-}
-
-# 绘图函数保持不变
-create_bootstrap_plot <- function(metric, kde_data, y_max = NULL) {
-  plot_data <- data.frame()
-  for (group in group_levels) {
-    group_data <- kde_data[[group]]
-    emp_top <- group_data$empirical_kde %>% filter(y >= max(y) * 0.1)
-    emp_df <- data.frame(Group = group, x = emp_top$x, y = emp_top$y,
-                         Color = fill_colors[which(group_levels == group)])
-    plot_data <- rbind(plot_data, emp_df)
-  }
-  
-  if (is.null(y_max)) y_max <- max(plot_data$y) * 1.1
-  
-  p <- ggplot(plot_data, aes(x = x, y = y, fill = Group, color = Group)) +
-    geom_area(position = "identity", alpha = 0.3) +
-    scale_fill_manual(values = setNames(fill_colors, group_levels)) +
-    scale_color_manual(values = setNames(fill_colors, group_levels)) +
-    theme_prism() +
-    labs(x = metric, y = "Probability Density", 
-         title = paste("Bootstrap Distribution:", metric)) +
-    coord_cartesian(ylim = c(0, y_max))
-  return(p)
-}
-
-create_simulated_plot <- function(metric, kde_data, y_max = NULL) {
-  plot_data <- data.frame()
-  for (group in group_levels) {
-    group_data <- kde_data[[group]]
-    sim_top <- group_data$simulated_kde %>% filter(y >= max(y) * 0.1)
-    sim_df <- data.frame(Group = group, x = sim_top$x, y = sim_top$y,
-                         Color = fill_colors[which(group_levels == group)])
-    plot_data <- rbind(plot_data, sim_df)
-  }
-  
-  if (is.null(y_max)) y_max <- max(plot_data$y) * 1.1
-  
-  p <- ggplot(plot_data, aes(x = x, y = y, fill = Group, color = Group)) +
-    geom_area(position = "identity", alpha = 0.3) +
-    scale_fill_manual(values = setNames(fill_colors, group_levels)) +
-    scale_color_manual(values = setNames(fill_colors, group_levels)) +
-    theme_prism() +
-    labs(x = metric, y = "Probability Density", 
-         title = paste("Simulated Distribution:", metric)) +
-    coord_cartesian(ylim = c(0, y_max))
-  return(p)
-}
-
-# 绘制并保存图像
-ic_bootstrap_plot <- create_bootstrap_plot("IC", kde_results$IC, y_max = 8)
-ic_simulated_plot <- create_simulated_plot("IC", kde_results$IC, y_max = 8)
-ws_bootstrap_plot <- create_bootstrap_plot("WS", kde_results$WS, y_max = 8)
-ws_simulated_plot <- create_simulated_plot("WS", kde_results$WS, y_max = 8)
-
-ggsave(filename = file.path(file_path, "distributionIC_bootstrap.png"), 
-       plot = ic_bootstrap_plot, width = 10, height = 6, dpi = 500)
-ggsave(filename = file.path(file_path, "distributionIC_simulated.png"), 
-       plot = ic_simulated_plot, width = 10, height = 6, dpi = 500)
-ggsave(filename = file.path(file_path, "distributionWS_bootstrap.png"), 
-       plot = ws_bootstrap_plot, width = 10, height = 6, dpi = 500)
-ggsave(filename = file.path(file_path, "distributionWS_simulated.png"), 
-       plot = ws_simulated_plot, width = 10, height = 6, dpi = 500)
-
-# 保存结果
-write_csv(distribution_results, file.path(file_path, "distribution_comparison_results.csv"))
-
-cat("Analysis completed successfully!\n")
-cat("Bootstrap strategy: Each group generates", n_boot, "bootstrap means\n")
 ```
 
 ## 基于ND数据做后续分析
@@ -1106,8 +1004,9 @@ generate_scatter_plots <- function(data, group_colors, group_name, outcome_matri
     for (group in unique(data$Group)) {
       subset_data <- subset(data, Group == group)
       model <- lm(as.formula(paste(outcome_var, "~", predictor)), data = subset_data)
-      slope <- coef(model)[2]
-      slopep <- summary(model)$coefficients[2, 4]
+      model_beta <- lm.beta(model)  # 计算标准化回归系数
+      slope <- coef(model_beta)[2]  # 标准化 beta
+      slopep <- summary(model)$coefficients[2, 4]  # p value
       cat(sprintf("  %s: slope=%.4f, p=%.4f\n", group, slope, slopep))
     }
 
