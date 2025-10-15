@@ -241,9 +241,9 @@ for (g in unique(main_data$Group2)) {
         test <- cor.test(temp_data[[tvar]], temp_data[[ovar]], method = "pearson")
         cat(sprintf("%-25s r = %6.3f, p = %.4f\n", ovar, test$estimate, test$p.value))
       } else {cat(sprintf("%-25s data default\n", ovar))
-      }}}}
+      }}}
+  cat("\n")}
 ```
-
 
 ## Draw symptom plots
 ```{r Figure4 A-C, results='asis'}
