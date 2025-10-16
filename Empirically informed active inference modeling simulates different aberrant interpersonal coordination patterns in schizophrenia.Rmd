@@ -352,13 +352,12 @@ print(PANSS_Total_Plot)
 
 ## Draw behavior bar-plots
 ```{r Figure 4D-G, results='asis'}
-plot_empirical <- function(data_column, y_label, file_name, height) {
+plot_empirical <- function(data_column, y_label, file_name) {
   data <- data.frame(
-    group = factor(c(rep('HC',16), rep('PS',8), rep('NS',8), rep('NA',1), rep('BA',4), rep('WD',4)),
-            levels = c('HC','PS','NS','NA','BA','WD')),
+    group = factor(c(rep('HC',16), rep('PS',8), rep('NS',8)),
+            levels = c('HC','PS','NS')),
     exp = c(main_data[[data_column]][1:16], main_data[[data_column]][17:24],
-            main_data[[data_column]][25:32],  0,
-            main_data[[data_column]][25:28],  main_data[[data_column]][29:32]))
+            main_data[[data_column]][25:32]))
   p <- ggplot(data = data, mapping = aes(x = factor(group), y = exp, fill = group)) +
     stat_summary(fun = "mean", geom = "bar", width = 0.7, colour = NA, size = 0.9) +
     geom_jitter(data = subset(data, group != 'NA'), size = 1) +
@@ -371,22 +370,50 @@ plot_empirical <- function(data_column, y_label, file_name, height) {
           axis.text = element_text(size = 12, color = "black", face = 'plain'),
           axis.title = element_text(size = 14, face = 'plain')) +
     coord_cartesian(ylim = c(0, 1.05)) +
-    scale_fill_manual(values = c('#66c2a5','#fc8d62','#8da0cb', 'transparent', '#e78ac3','#a6d854')) +
-    scale_x_discrete(breaks = c('HC','PS','NS','BA','WD'), labels = c('HC','PS','NS','BA','WD')) +
-    labs(x = NULL, y = y_label) +
-    geom_rect(aes(xmin = 2.5, xmax = 3.5, ymin = -0.02, ymax = height),
-              fill = NA, color = 'black', linetype = 'dashed', size = 0.75) +
-    geom_rect(aes(xmin = 4.5, xmax = 6.5, ymin = -0.02, ymax = height),
-              fill = NA, color = 'black', linetype = 'dashed', size = 0.75)
-  ggsave(filename = file.path(basepath, file_name), plot = p, width = 5, height = 4, dpi = 500)
+    scale_fill_manual(values = c('#66c2a5','#fc8d62','#8da0cb')) +
+    scale_x_discrete(breaks = c('HC','PS','NS'), labels = c('HC','PS','NS')) +
+    labs(x = NULL, y = y_label) 
+  ggsave(filename = file.path(basepath, file_name), plot = p, width = 4, height = 4, dpi = 500)
   print(p)
 }
 
-plot_empirical("IC_scaled", "IC", "EmpiricalPlot_IC.png", 0.4)
-plot_empirical("WS_scaled", "WS", "EmpiricalPlot_WS.png", 0.7)
-plot_empirical("WSearlier_scaled", "WS with metronome", "EmpiricalPlot_WSearlier.png", 0.85)
-plot_empirical("RDearlier_scaled", "RD with metronome", "EmpiricalPlot_RDearlier.png", 1.05)
+plot_empirical("IC_scaled", "IC", "EmpiricalPlot_IC.png")
+plot_empirical("WS_scaled", "WS", "EmpiricalPlot_WS.png")
+plot_empirical("WSearlier_scaled", "WS with metronome", "EmpiricalPlot_WSearlier.png")
+plot_empirical("RDearlier_scaled", "RD with metronome", "EmpiricalPlot_RDearlier.png")
 ```
+## Draw subgroups behavior bar-plots
+```{r Figure S3A, results='asis'}
+plot_empirical <- function(data_column, y_label, file_name) {
+  data <- data.frame(
+    group = factor(c(rep('BA',4), rep('WD',4)),
+            levels = c('BA','WD')),
+    exp = c(main_data[[data_column]][25:28], main_data[[data_column]][29:32]))
+  p <- ggplot(data = data, mapping = aes(x = factor(group), y = exp, fill = group)) +
+    stat_summary(fun = "mean", geom = "bar", width = 0.7, colour = NA, size = 0.9) +
+    geom_jitter(data = subset(data, group != 'NA'), size = 1) +
+    stat_summary(fun = "mean", fun.max = function(x) mean(x) + sd(x),
+                 fun.min = function(x) mean(x) - sd(x), geom = "errorbar", width = 0.4, size = 0.7) +
+    theme_prism(axis_text_angle = 0) +
+    theme(legend.direction = "vertical",
+          axis.line = element_line(color = 'black', size = 0.75),
+          axis.ticks = element_line(color = 'black', size = 0.75),
+          axis.text = element_text(size = 12, color = "black", face = 'plain'),
+          axis.title = element_text(size = 14, face = 'plain')) +
+    coord_cartesian(ylim = c(0, 1.05)) +
+    scale_fill_manual(values = c('#e78ac3','#a6d854')) +
+    scale_x_discrete(breaks = c('BA','WD'), labels = c('BA','WD')) +
+    labs(x = NULL, y = y_label) 
+  ggsave(filename = file.path(basepath, file_name), plot = p, width = 4, height = 4, dpi = 500)
+  print(p)
+}
+
+plot_empirical("IC_scaled", "IC", "EmpiricalSubPlot_IC_.png")
+plot_empirical("WS_scaled", "WS", "EmpiricalSubPlot_WS.png")
+plot_empirical("WSearlier_scaled", "WS with metronome", "EmpiricalSubPlot_WSearlier.png")
+plot_empirical("RDearlier_scaled", "RD with metronome", "EmpiricalSubPlot_RDearlier.png")
+```
+
 
 ## Draw hidden state probability
 ```{r Figure 6A, results='asis'}
@@ -407,7 +434,7 @@ plot_hidden_state <- function(data, groups) {
     theme_minimal(base_size = 18) +
     theme(legend.position = "none")}
 p1 <- plot_hidden_state(hiddenstateprobs, c("HC", "PS", "NS"))
-p2 <- plot_hidden_state(hiddenstateprobs, c("HC", "PS", "BA", "WD"))
+p2 <- plot_hidden_state(hiddenstateprobs, c("BA", "WD"))
 combined_plot <- p1 + p2 + plot_layout(ncol = 2)
 print(combined_plot)
 ggsave("C:/Users/XinHao/Desktop/2025_SCZ_AI/simulation/SimulatedPlot_HiddenState.png", combined_plot, width = 16, height = 8, dpi = 300)
@@ -451,14 +478,16 @@ for (st in names(results)) {
 }
 ```
 
+
+
 ## Draw bar-plot of single shot simulation
 ```{r Figure 6B, results='asis'}
 file_path <- "C:/Users/XinHao/Desktop/2025_SCZ_AI/simulation/"
-group_levels <- c("HC", "PS", "NS", "NA", "BA", "WD")
-fill_colors <- c('#66c2a5','#fc8d62','#8da0cb', 'transparent', '#e78ac3','#a6d854')
-plot_metric <- function(metric_name, empirical_values, filename, ylim_max, rect_ymax) {
+group_levels <- c("HC", "PS", "NS")
+fill_colors <- c('#66c2a5','#fc8d62','#8da0cb')
+plot_metric <- function(metric_name, empirical_values, filename, ylim_max) {
   emp_data <- data.frame(
-    group = factor(rep(group_levels, times = c(16,8,8,1,4,4)), levels = group_levels),
+    group = factor(rep(group_levels, times = c(16,8,8)), levels = group_levels),
     exp = empirical_values)
   emp_summary <- emp_data %>%
     group_by(group) %>%
@@ -471,10 +500,10 @@ plot_metric <- function(metric_name, empirical_values, filename, ylim_max, rect_
     mutate(group = factor(group, levels = group_levels))
   
   data_summary <- sim_data %>%
-    filter(group %in% c("HC", "PS", "NS", "BA", "WD")) %>%
+    filter(group %in% c("HC", "PS", "NS")) %>%
     group_by(group) %>%
     summarise(mean_bar = mean(.data[[metric_name]], na.rm = TRUE), .groups = "drop")
-  data_summary <- rbind(data_summary[1:3, ], data.frame(group = 'NA', mean_bar = 0), data_summary[4:5, ])
+  data_summary <- data_summary[1:3, ]
   data_summary$group <- factor(data_summary$group, levels = group_levels)
   
   p <- ggplot(data = data_summary, aes(x = group, y = mean_bar, fill = group)) +
@@ -491,27 +520,76 @@ plot_metric <- function(metric_name, empirical_values, filename, ylim_max, rect_
       axis.title = element_text(size = 14, face = 'plain')) +
     coord_cartesian(ylim = c(0, ylim_max)) +
     scale_fill_manual(values = fill_colors) +
-    scale_x_discrete(breaks = c("HC", "PS", "NS", "BA", "WD"), labels = c("HC", "PS", "NS", "BA", "WD")) +
-    labs(x = NULL, y = metric_name) +
-    geom_rect(aes(xmin = 2.5, xmax = 3.5, ymin = -0.02, ymax = rect_ymax), fill = NA, color = 'black', linetype = 'dashed', size = 0.5) +
-    geom_rect(aes(xmin = 4.5, xmax = 6.5, ymin = -0.02, ymax = rect_ymax), fill = NA, color = 'black', linetype = 'dashed', size = 0.5)
-  ggsave(filename = file.path(file_path, filename), plot = p, width = 5, height = 4, dpi = 500)
+    scale_x_discrete(breaks = c("HC", "PS", "NS"), labels = c("HC", "PS", "NS")) +
+    labs(x = NULL, y = metric_name) 
+  ggsave(filename = file.path(file_path, filename), plot = p, width = 4, height = 4, dpi = 500)
   print(p)
 }
-emp_values_IC <- c(main_data$IC_scaled[1:16], main_data$IC_scaled[17:24], main_data$IC_scaled[25:32], 0, main_data$IC_scaled[25:28],main_data$IC_scaled[29:32])
-plot_metric("IC", emp_values_IC, "SimulatedPlot_SS_IC.png", ylim_max = 1, rect_ymax = 0.4)
-emp_values_WS <- c(main_data$WS_scaled[1:16], main_data$WS_scaled[17:24], main_data$WS_scaled[25:32], 0, main_data$WS_scaled[25:28],main_data$WS_scaled[29:32])
-plot_metric("WS", emp_values_WS, "SimulatedPlot_SS_WS.png", ylim_max = 1, rect_ymax = 0.65)
+emp_values_IC <- c(main_data$IC_scaled[1:16], main_data$IC_scaled[17:24], main_data$IC_scaled[25:32])
+plot_metric("IC", emp_values_IC, "SimulatedPlot_SS_IC.png", ylim_max = 1)
+emp_values_WS <- c(main_data$WS_scaled[1:16], main_data$WS_scaled[17:24], main_data$WS_scaled[25:32])
+plot_metric("WS", emp_values_WS, "SimulatedPlot_SS_WS.png", ylim_max = 1)
+```
+
+## Draw subgroup bar-plot of single shot simulation
+```{r Figure S3B, results='asis'}
+file_path <- "C:/Users/XinHao/Desktop/2025_SCZ_AI/simulation/"
+group_levels <- c("BA", "WD")
+fill_colors <- c('#e78ac3','#a6d854')
+plot_metric <- function(metric_name, empirical_values, filename, ylim_max) {
+  emp_data <- data.frame(
+    group = factor(rep(group_levels, times = c(4,4)), levels = group_levels),
+    exp = empirical_values)
+  emp_summary <- emp_data %>%
+    group_by(group) %>%
+    summarise(Mean = mean(exp, na.rm=TRUE), SD = sd(exp, na.rm=TRUE))
+  emp_summary[emp_summary$group == "NA", "SD"] <- 0
+  print(emp_summary[, c("group", "Mean", "SD")])
+  
+  sim_data <- read_csv(paste0(file_path, 'simulated_performance_ss26Aug2025.csv')) %>%
+    filter(group %in% group_levels) %>%
+    mutate(group = factor(group, levels = group_levels))
+  
+  data_summary <- sim_data %>%
+    filter(group %in% c("BA", "WD")) %>%
+    group_by(group) %>%
+    summarise(mean_bar = mean(.data[[metric_name]], na.rm = TRUE), .groups = "drop")
+  data_summary <- data_summary[1:2, ]
+  data_summary$group <- factor(data_summary$group, levels = group_levels)
+  
+  p <- ggplot(data = data_summary, aes(x = group, y = mean_bar, fill = group)) +
+    geom_bar(stat = 'identity', position = 'dodge', width = 0.7) +
+    geom_point(data = subset(emp_summary, group != 'NA'), aes(x = group, y = Mean, fill = group), size = 1.25) +
+    geom_errorbar(data = subset(emp_summary, group != 'NA'), 
+                  aes(x = group, ymin = Mean - SD, ymax = Mean + SD), 
+                  inherit.aes = FALSE, width = 0.4, size = 0.5, color = "black") +
+    theme_prism(axis_text_angle = 0) +
+    theme(legend.direction = "vertical",
+      axis.line = element_line(color = 'black', size = 0.75),
+      axis.ticks = element_line(color = 'black', size = 0.75),
+      axis.text = element_text(size = 12, color = "black", face = 'plain'),
+      axis.title = element_text(size = 14, face = 'plain')) +
+    coord_cartesian(ylim = c(0, ylim_max)) +
+    scale_fill_manual(values = fill_colors) +
+    scale_x_discrete(breaks = c("BA", "WD"), labels = c("BA", "WD")) +
+    labs(x = NULL, y = metric_name) 
+  ggsave(filename = file.path(file_path, filename), plot = p, width = 4, height = 4, dpi = 500)
+  print(p)
+}
+emp_values_IC <- c(main_data$IC_scaled[25:28], main_data$IC_scaled[29:32])
+plot_metric("IC", emp_values_IC, "SimulatedSubPlot_SS_IC.png", ylim_max = 1)
+emp_values_WS <- c(main_data$WS_scaled[25:28], main_data$WS_scaled[29:32])
+plot_metric("WS", emp_values_WS, "SimulatedSubPlot_SS_WS.png", ylim_max = 1)
 ```
 
 ## Draw violin-plot of Gaussian simulation
 ```{r Figure 6C, results='asis'}
 file_path <- "C:/Users/XinHao/Desktop/2025_SCZ_AI/simulation/"
-group_levels <- c("HC", "PS", "NS", "NA", "BA", "WD")
-fill_colors <- c('#66c2a5','#fc8d62','#8da0cb', 'transparent', '#e78ac3','#a6d854')
-plot_metric_violin <- function(metric_name, empirical_values, filename, ylim_max, rect_ymax) {
+group_levels <- c("HC", "PS", "NS")
+fill_colors <- c('#66c2a5','#fc8d62','#8da0cb')
+plot_metric_violin <- function(metric_name, empirical_values, filename, ylim_max) {
     emp_data <- data.frame(
-        Group = factor(rep(group_levels, times = c(16,8,8,1,4,4)), levels = group_levels),
+        Group = factor(rep(group_levels, times = c(16,8,8)), levels = group_levels),
         exp = empirical_values)
     emp_summary <- emp_data %>%
         group_by(Group) %>%
@@ -539,21 +617,64 @@ plot_metric_violin <- function(metric_name, empirical_values, filename, ylim_max
             axis.title=element_text(size=14, face='plain')) +
         coord_cartesian(ylim=c(0, ylim_max)) +
         scale_fill_manual(values = setNames(fill_colors, group_levels)) +
-        scale_x_discrete(breaks=c("HC","PS","NS","BA","WD"), labels=c("HC","PS","NS","BA","WD")) +
-        labs(x=NULL, y=metric_name) +
-        geom_rect(aes(xmin=2.5, xmax=3.5, ymin=0, ymax=rect_ymax), fill=NA, color='black', linetype='dashed', size=0.5) +
-        geom_rect(aes(xmin=4.5, xmax=6.5, ymin=0, ymax=rect_ymax), fill=NA, color='black', linetype='dashed', size=0.5)
+        scale_x_discrete(breaks=c("HC","PS","NS"), labels=c("HC","PS","NS")) +
+        labs(x=NULL, y=metric_name) 
     ggsave(filename=file.path(file_path, filename), plot=p, width=5, height=4, dpi=500)
     print(p)
 }
 
-emp_values_IC <- c(main_data$IC_scaled[1:16], main_data$IC_scaled[17:24], main_data$IC_scaled[25:32],
-                   0, main_data$IC_scaled[25:28], main_data$IC_scaled[29:32])
-plot_metric_violin("IC", emp_values_IC, "SimulatedPlot_ND_IC.png", ylim_max=1, rect_ymax=0.45)
-emp_values_WS <- c(main_data$WS_scaled[1:16], main_data$WS_scaled[17:24], main_data$WS_scaled[25:32],
-                   0, main_data$WS_scaled[25:28], main_data$WS_scaled[29:32])
-plot_metric_violin("WS", emp_values_WS, "SimulatedPlot_ND_WS.png", ylim_max=1, rect_ymax=0.7)
+emp_values_IC <- c(main_data$IC_scaled[1:16], main_data$IC_scaled[17:24], main_data$IC_scaled[25:32])
+plot_metric_violin("IC", emp_values_IC, "SimulatedPlot_ND_IC.png", ylim_max=1)
+emp_values_WS <- c(main_data$WS_scaled[1:16], main_data$WS_scaled[17:24], main_data$WS_scaled[25:32])
+plot_metric_violin("WS", emp_values_WS, "SimulatedPlot_ND_WS.png", ylim_max=1)
 ```
+## Draw subgroup violin-plot of Gaussian simulation
+```{r Figure S3C, results='asis'}
+file_path <- "C:/Users/XinHao/Desktop/2025_SCZ_AI/simulation/"
+group_levels <- c("BA", "WD")
+fill_colors <- c('#e78ac3','#a6d854')
+plot_metric_violin <- function(metric_name, empirical_values, filename, ylim_max) {
+    emp_data <- data.frame(
+        Group = factor(rep(group_levels, times = c(4,4)), levels = group_levels),
+        exp = empirical_values)
+    emp_summary <- emp_data %>%
+        group_by(Group) %>%
+        summarise(Mean = mean(exp, na.rm=TRUE), SD = sd(exp, na.rm=TRUE), .groups="drop") 
+    emp_summary[emp_summary$Group == "NA", "SD"] <- 0
+    print(emp_summary[, c("Group","Mean","SD")])
+    
+    sim_data <- read_csv(paste0(file_path, 'nd_sim_26aug.csv')) %>%
+        filter(Group %in% group_levels) %>%
+        mutate(Group = factor(Group, levels = group_levels))
+    
+    if(!"NA" %in% sim_data$Group){
+        sim_data <- sim_data %>% add_row(Group=factor("NA", levels=group_levels))}
+    
+    p <- ggplot(data = sim_data, aes(x = Group, y = .data[[metric_name]], fill = Group)) +
+        geom_violin(trim=FALSE, width=1, color=NA, adjust = 2) +
+        geom_point(data = subset(emp_summary, Group != "NA"), aes(x = Group, y = Mean), size=1.25) +
+        geom_errorbar(data = subset(emp_summary, Group != "NA"), aes(x=Group, ymin=Mean-SD, ymax=Mean+SD),
+                      inherit.aes = FALSE, width=0.4, size=0.5, color="black") +
+        theme_prism(axis_text_angle=0) +
+        theme(legend.direction="vertical",
+            axis.line=element_line(color='black', size=0.75),
+            axis.ticks=element_line(color='black', size=0.75),
+            axis.text=element_text(size=12, color="black", face='plain'),
+            axis.title=element_text(size=14, face='plain')) +
+        coord_cartesian(ylim=c(0, ylim_max)) +
+        scale_fill_manual(values = setNames(fill_colors, group_levels)) +
+        scale_x_discrete(breaks=c("BA", "WD"), labels=c("BA", "WD")) +
+        labs(x=NULL, y=metric_name) 
+    ggsave(filename=file.path(file_path, filename), plot=p, width=5, height=4, dpi=500)
+    print(p)
+}
+
+emp_values_IC <- c(main_data$IC_scaled[25:28], main_data$IC_scaled[29:32])
+plot_metric_violin("IC", emp_values_IC, "SimulatedSubPlot_ND_IC.png", ylim_max=1)
+emp_values_WS <- c(main_data$WS_scaled[25:28], main_data$WS_scaled[29:32])
+plot_metric_violin("WS", emp_values_WS, "SimulatedSubPlot_ND_WS.png", ylim_max=1)
+```
+
 
 ## Test best-fit distribution of Gaussian simulation
 ```{r Table 4C}
