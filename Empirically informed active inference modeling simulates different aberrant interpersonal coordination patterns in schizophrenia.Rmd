@@ -1,7 +1,7 @@
 ---
 title: "Empirically informed active inference modeling simulates different aberrant interpersonal coordination patterns in schizophrenia"
 author: "XinHao"
-date: "2025-10-15"
+date: "2025-10-23"
 output: html_document
 ---
 
@@ -229,24 +229,73 @@ other_vars <- c("IRI_Fantasy", "IRI_EmpathicConcern", "IRI_Perspective",
   "SQLS_MotivationEnergy", "SQLS_SymptomSideeffect", "SQLS_PsychosocialFacet",
   "Token.Motor.Task", "Digit.Symbol.Test", "Digit.Span.Test_sequence",
   "Digit.Span.Test_reverse", "Digit.Span.Test_sum")
-for (g in unique(main_data$Group2)) {
-  cat("Group:", g, "\n")
-  group_data <- main_data %>% filter(Group2 == g)
+
+group_sets <- list(
+  "Group1"   = c(1),
+  "Group2"   = c(2),
+  "Group3"   = c(3),
+  "Group2_3" = c(2, 3)  
+)
+
+for (grp_name in names(group_sets)) {
+  g_vals <- group_sets[[grp_name]]
+  group_data <- main_data %>% filter(Group2 %in% g_vals)
+  cat("\n=============================\n")
+  cat("Group:", grp_name, " (Group2 in", paste(g_vals, collapse = ","), ")\n")
+  cat("=============================\n")
+
   for (tvar in target_vars) {
     cat("\n--", tvar, "--\n")
+    all_results <- list()
+    var_names <- c()
+    
     for (ovar in other_vars) {
       temp_data <- group_data[, c(tvar, ovar)]
       temp_data <- temp_data[complete.cases(temp_data), ]
+      
       if (nrow(temp_data) > 2) { 
         test <- cor.test(temp_data[[tvar]], temp_data[[ovar]], method = "pearson")
-        cat(sprintf("%-25s r = %6.3f, p = %.4f\n", ovar, test$estimate, test$p.value))
-      } else {cat(sprintf("%-25s data default\n", ovar))
-      }}}
-  cat("\n")}
+        ci_low <- test$conf.int[1]
+        ci_high <- test$conf.int[2]
+        all_results[[length(all_results) + 1]] <- list(
+          variable = ovar, r = test$estimate,
+          p_raw = test$p.value, n = nrow(temp_data),
+          ci_low = ci_low, ci_high = ci_high
+        )
+        var_names <- c(var_names, ovar)
+      } else {
+        all_results[[length(all_results) + 1]] <- list(
+          variable = ovar, r = NA, p_raw = NA, n = 0,
+          ci_low = NA, ci_high = NA
+        )
+        var_names <- c(var_names, ovar)
+      }
+    }
+    
+    p_raw <- sapply(all_results, function(x) x$p_raw)
+    p_fdr <- p.adjust(p_raw, method = "fdr")
+    p_bonf <- p.adjust(p_raw, method = "bonferroni")
+    
+    for (i in 1:length(all_results)) {
+      result <- all_results[[i]]
+      if (!is.na(result$r) && result$n > 2) {
+        cat(sprintf(
+          "%-25s r = %6.3f, 95%% CI = [%.3f, %.3f], n = %2d, p_raw = %.4f, p_fdr = %.4f, p_bonf = %.4f\n",
+          result$variable, result$r, result$ci_low, result$ci_high,
+          result$n, result$p_raw, p_fdr[i], p_bonf[i]
+        ))
+      } else {
+        cat(sprintf("%-25s data default\n", result$variable))
+      }
+    }
+  }
+  cat("\n")
+}
+
 ```
 
 ## Draw symptom plots
-```{r Figure4 A-C, results='asis'}
+```{r Figure3 A-C, results='asis'}
 main_data$`PANSS_P1.+.P3.(psychotic)` <- as.numeric(main_data$`PANSS_P1.+.P3.(psychotic)`)
 main_data$`PANSS_N2.+.N4.(withdrawal)` <- as.numeric(main_data$`PANSS_N2.+.N4.(withdrawal)`)
 main_data$`PANSS_N1.(blunted.affect)` <- as.numeric(main_data$`PANSS_N1.(blunted.affect)`)
@@ -351,7 +400,7 @@ print(PANSS_Total_Plot)
 ```
 
 ## Draw behavior bar-plots
-```{r Figure 4D-G, results='asis'}
+```{r Figure 3D-G, results='asis'}
 plot_empirical <- function(data_column, y_label, file_name) {
   data <- data.frame(
     group = factor(c(rep('HC',16), rep('PS',8), rep('NS',8)),
@@ -361,8 +410,9 @@ plot_empirical <- function(data_column, y_label, file_name) {
   p <- ggplot(data = data, mapping = aes(x = factor(group), y = exp, fill = group)) +
     stat_summary(fun = "mean", geom = "bar", width = 0.7, colour = NA, size = 0.9) +
     geom_jitter(data = subset(data, group != 'NA'), size = 1) +
-    stat_summary(fun = "mean", fun.max = function(x) mean(x) + sd(x),
-                 fun.min = function(x) mean(x) - sd(x), geom = "errorbar", width = 0.4, size = 0.7) +
+    stat_summary(fun = "mean", fun.max = function(x) mean(x) + sd(x)/sqrt(length(x)),
+                 fun.min = function(x) mean(x) - sd(x)/sqrt(length(x)), 
+                 geom = "errorbar", width = 0.4, size = 0.7) +
     theme_prism(axis_text_angle = 0) +
     theme(legend.direction = "vertical",
           axis.line = element_line(color = 'black', size = 0.75),
@@ -416,7 +466,7 @@ plot_empirical("RDearlier_scaled", "RD with metronome", "EmpiricalSubPlot_RDearl
 
 
 ## Draw hidden state probability
-```{r Figure 6A, results='asis'}
+```{r Figure 5A, results='asis'}
 hiddenstateprobs <- read.csv("C:/Users/XinHao/Desktop/2025_SCZ_AI/simulation/hiddenstateprobs.csv")
 group_colors <- c('HC' = '#66c2a5','PS' = '#fc8d62','NS' = '#8da0cb','BA' = '#e78ac3','WD' = '#a6d854')
 plot_hidden_state <- function(data, groups) {
@@ -481,7 +531,7 @@ for (st in names(results)) {
 
 
 ## Draw bar-plot of single shot simulation
-```{r Figure 6B, results='asis'}
+```{r Figure 5B-C, results='asis'}
 file_path <- "C:/Users/XinHao/Desktop/2025_SCZ_AI/simulation/"
 group_levels <- c("HC", "PS", "NS")
 fill_colors <- c('#66c2a5','#fc8d62','#8da0cb')
@@ -583,7 +633,7 @@ plot_metric("WS", emp_values_WS, "SimulatedSubPlot_SS_WS.png", ylim_max = 1)
 ```
 
 ## Draw violin-plot of Gaussian simulation
-```{r Figure 6C, results='asis'}
+```{r Figure 5D-E, results='asis'}
 file_path <- "C:/Users/XinHao/Desktop/2025_SCZ_AI/simulation/"
 group_levels <- c("HC", "PS", "NS")
 fill_colors <- c('#66c2a5','#fc8d62','#8da0cb')
@@ -755,7 +805,7 @@ dev.off()
 ```
 
 ## GLM analysis
-```{r Figure 7&S2, results='asis'}
+```{r Figure 6, results='asis'}
 file_path <- "C:/Users/XinHao/Desktop/2025_SCZ_AI/simulation/"
 nd_data <- read_csv(paste0(file_path, 'nd_sim_26aug.csv'))
 sub1data <- subset(nd_data, Group %in% c('HC', 'PS', 'NS'))
