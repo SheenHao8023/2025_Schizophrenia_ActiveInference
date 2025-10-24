@@ -277,6 +277,7 @@ for (grp_name in names(group_sets)) {
 
 plot_data_sig <- plot_data %>%
   dplyr::filter(!is.na(ci_low) & ci_low * ci_high > 0)   
+# 画图思路参考：Di Stefano, J. (2004). A confidence interval approach to data analysis. Forest Ecology and Management, 187(2-3), 173-183.
 if (nrow(plot_data_sig) > 0) {
   plot_data_sig$Group <- factor(plot_data_sig$Group,
                                 levels = c("Group1", "Group2", "Group3", "Group2_3"),
