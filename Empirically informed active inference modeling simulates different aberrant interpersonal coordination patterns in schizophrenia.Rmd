@@ -230,12 +230,8 @@ other_vars <- c("IRI_Fantasy", "IRI_EmpathicConcern", "IRI_Perspective",
   "Token.Motor.Task", "Digit.Symbol.Test", "Digit.Span.Test_sequence",
   "Digit.Span.Test_reverse", "Digit.Span.Test_sum")
 
-group_sets <- list(
-  "Group1"   = c(1),
-  "Group2"   = c(2),
-  "Group3"   = c(3),
-  "Group2_3" = c(2, 3)  
-)
+group_sets <- list("Group1" = c(1),"Group2" = c(2),"Group3" = c(3),"Group2_3" = c(2, 3))
+plot_data <- data.frame()
 
 for (grp_name in names(group_sets)) {
   g_vals <- group_sets[[grp_name]]
@@ -243,16 +239,13 @@ for (grp_name in names(group_sets)) {
   cat("\n=============================\n")
   cat("Group:", grp_name, " (Group2 in", paste(g_vals, collapse = ","), ")\n")
   cat("=============================\n")
-
   for (tvar in target_vars) {
     cat("\n--", tvar, "--\n")
     all_results <- list()
     var_names <- c()
-    
     for (ovar in other_vars) {
       temp_data <- group_data[, c(tvar, ovar)]
       temp_data <- temp_data[complete.cases(temp_data), ]
-      
       if (nrow(temp_data) > 2) { 
         test <- cor.test(temp_data[[tvar]], temp_data[[ovar]], method = "pearson")
         ci_low <- test$conf.int[1]
@@ -260,18 +253,11 @@ for (grp_name in names(group_sets)) {
         all_results[[length(all_results) + 1]] <- list(
           variable = ovar, r = test$estimate,
           p_raw = test$p.value, n = nrow(temp_data),
-          ci_low = ci_low, ci_high = ci_high
-        )
-        var_names <- c(var_names, ovar)
+          ci_low = ci_low, ci_high = ci_high)
       } else {
         all_results[[length(all_results) + 1]] <- list(
           variable = ovar, r = NA, p_raw = NA, n = 0,
-          ci_low = NA, ci_high = NA
-        )
-        var_names <- c(var_names, ovar)
-      }
-    }
-    
+          ci_low = NA, ci_high = NA)}}
     p_raw <- sapply(all_results, function(x) x$p_raw)
     p_fdr <- p.adjust(p_raw, method = "fdr")
     p_bonf <- p.adjust(p_raw, method = "bonferroni")
@@ -279,19 +265,53 @@ for (grp_name in names(group_sets)) {
     for (i in 1:length(all_results)) {
       result <- all_results[[i]]
       if (!is.na(result$r) && result$n > 2) {
-        cat(sprintf(
-          "%-25s r = %6.3f, 95%% CI = [%.3f, %.3f], n = %2d, p_raw = %.4f, p_fdr = %.4f, p_bonf = %.4f\n",
-          result$variable, result$r, result$ci_low, result$ci_high,
-          result$n, result$p_raw, p_fdr[i], p_bonf[i]
-        ))
-      } else {
-        cat(sprintf("%-25s data default\n", result$variable))
-      }
-    }
-  }
-  cat("\n")
-}
+        cat(sprintf("%-25s r = %6.3f, 95%% CI = [%.3f, %.3f], n = %2d, p_raw = %.4f, p_fdr = %.4f, p_bonf = %.4f\n",result$variable, result$r, result$ci_low, result$ci_high,result$n, result$p_raw, p_fdr[i], p_bonf[i]))
 
+        plot_data <- rbind(plot_data, data.frame(
+          Group = grp_name,Target = tvar,Variable = result$variable,
+          r = result$r,ci_low = result$ci_low,ci_high = result$ci_high))
+      } else {cat(sprintf("%-25s data default\n", result$variable))}}}
+  cat("\n")}
+
+plot_data_sig <- plot_data %>%
+  filter(!is.na(ci_low) & ci_low * ci_high > 0)   
+
+if (nrow(plot_data_sig) > 0) {
+  plot_data_sig$Group <- factor(plot_data_sig$Group,
+                                levels = c("Group1", "Group2", "Group3", "Group2_3"),
+                                labels = c("HC", "PS", "NS", "PS+NS"))
+  group_colors <- c("HC" = "#66c2a5","PS" = "#fc8d62","NS" = "#8da0cb","PS+NS" = "#b78fa0")
+  
+  plot_data_sig$combo <- interaction(plot_data_sig$Group, plot_data_sig$Target, plot_data_sig$Variable)
+  plot_data_sig$Target_clean <- ifelse(grepl("IC", plot_data_sig$Target), "IC", "WS")
+  combo_labels <- plot_data_sig %>%
+    distinct(combo, Target_clean) %>%
+    arrange(combo)
+  
+  p <- ggplot(plot_data_sig,aes(x = combo, y = r, color = Group)) +
+    geom_point(size = 3, position = position_dodge(width = 0.6)) +
+    geom_errorbar(aes(ymin = ci_low, ymax = ci_high),width = 0.25, position = position_dodge(width = 0.6)) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "gray40", linewidth = 0.6) +
+    scale_color_manual(values = group_colors) +
+    scale_y_continuous(limits = c(-1, 1), expand = c(0.02, 0.02)) +
+    scale_x_discrete(labels = combo_labels$Target_clean) +
+    labs(y = "Pearson's r", x = NULL, color = "Group") +
+    theme_minimal(base_size = 13) +
+    theme(panel.grid.major.x = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.text.x = element_text(angle = 0, hjust = 1, color = "black"),
+      axis.text.y = element_text(color = "black"),
+      axis.title = element_text(color = "black"),
+      axis.line = element_line(color = "black", linewidth = 0.8),
+      axis.ticks = element_line(color = "black"),
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      legend.position = "top",
+      legend.title = element_text(face = "bold")) + 
+    geom_rect(aes(xmin = 0.7, xmax = 3.3, ymin = -0.05, ymax = 0),fill = "grey", alpha = 1, color = NA)+
+    geom_rect(aes(xmin = 3.7, xmax = 5.3, ymin = -0.05, ymax = 0),fill = "grey", alpha = 1, color = NA)+
+    geom_rect(aes(xmin = 5.7, xmax = 8.3, ymin = -0.05, ymax = 0),fill = "grey", alpha = 1, color = NA)
+  ggsave(filename = "C:/Users/XinHao/Desktop/2025_SCZ_AI/empirical_data/EmpiricalPlot_Correlation.png",
+         plot = p, width = 6, height = 6, dpi = 600, bg = "white")}
 ```
 
 ## Draw symptom plots
