@@ -231,7 +231,9 @@ other_vars <- c("IRI_Fantasy", "IRI_EmpathicConcern", "IRI_Perspective",
   "Digit.Span.Test_reverse", "Digit.Span.Test_sum")
 
 group_sets <- list("Group1" = c(1),"Group2" = c(2),"Group3" = c(3),"Group2_3" = c(2, 3))
-plot_data <- data.frame()
+plot_data <- data.frame(
+  Group = character(),Target = character(),Variable = character(),
+  r = numeric(),ci_low = numeric(),ci_high = numeric(),stringsAsFactors = FALSE)
 
 for (grp_name in names(group_sets)) {
   g_vals <- group_sets[[grp_name]]
@@ -268,14 +270,13 @@ for (grp_name in names(group_sets)) {
         cat(sprintf("%-25s r = %6.3f, 95%% CI = [%.3f, %.3f], n = %2d, p_raw = %.4f, p_fdr = %.4f, p_bonf = %.4f\n",result$variable, result$r, result$ci_low, result$ci_high,result$n, result$p_raw, p_fdr[i], p_bonf[i]))
 
         plot_data <- rbind(plot_data, data.frame(
-          Group = grp_name,Target = tvar,Variable = result$variable,
-          r = result$r,ci_low = result$ci_low,ci_high = result$ci_high))
+            Group = grp_name,Target = tvar,Variable = result$variable,
+            r = result$r,ci_low = result$ci_low,ci_high = result$ci_high))
       } else {cat(sprintf("%-25s data default\n", result$variable))}}}
   cat("\n")}
 
 plot_data_sig <- plot_data %>%
-  filter(!is.na(ci_low) & ci_low * ci_high > 0)   
-
+  dplyr::filter(!is.na(ci_low) & ci_low * ci_high > 0)   
 if (nrow(plot_data_sig) > 0) {
   plot_data_sig$Group <- factor(plot_data_sig$Group,
                                 levels = c("Group1", "Group2", "Group3", "Group2_3"),
@@ -307,11 +308,12 @@ if (nrow(plot_data_sig) > 0) {
       plot.title = element_text(face = "bold", hjust = 0.5),
       legend.position = "top",
       legend.title = element_text(face = "bold")) + 
-    geom_rect(aes(xmin = 0.7, xmax = 3.3, ymin = -0.05, ymax = 0),fill = "grey", alpha = 1, color = NA)+
-    geom_rect(aes(xmin = 3.7, xmax = 5.3, ymin = -0.05, ymax = 0),fill = "grey", alpha = 1, color = NA)+
-    geom_rect(aes(xmin = 5.7, xmax = 8.3, ymin = -0.05, ymax = 0),fill = "grey", alpha = 1, color = NA)
+    geom_rect(xmin = 0.7, xmax = 3.3, ymin = -0.05, ymax = 0,fill = "grey", alpha = 1, color = NA)+
+    geom_rect(xmin = 3.7, xmax = 5.3, ymin = -0.05, ymax = 0,fill = "grey", alpha = 1, color = NA)+
+    geom_rect(xmin = 5.7, xmax = 8.3, ymin = -0.05, ymax = 0,fill = "grey", alpha = 1, color = NA)
   ggsave(filename = "C:/Users/XinHao/Desktop/2025_SCZ_AI/empirical_data/EmpiricalPlot_Correlation.png",
-         plot = p, width = 6, height = 6, dpi = 600, bg = "white")}
+         plot = p, width = 6, height = 6, dpi = 600, bg = "white")
+  print(p)}
 ```
 
 ## Draw symptom plots
